@@ -28,6 +28,19 @@
 
 ---
 
+## 工作流
+
+| 文件 | 内容 |
+|------|------|
+| **[flow/pre-market.md](flow/pre-market.md)** | 盘前分析，08:00前完成 |
+| **[flow/post-market.md](flow/post-market.md)** | 盘后复盘，15:30后完成 |
+| **[flow/trading-plan.md](flow/trading-plan.md)** | 交易计划，每日盘后制定 |
+| **[flow/high-pr-picker.md](flow/high-pr-picker.md)** | 高PR选股，三重过滤器 |
+| **[flow/market-synthesis.md](flow/market-synthesis.md)** | 市场综合分析 |
+| **[flow/integrated-expert.md](flow/integrated-expert.md)** | 综合专家执行流程 |
+
+---
+
 ## 目录结构
 
 ```
@@ -60,12 +73,13 @@ a-shares-master/
 │   │   ├── templates.md      # 报告模板
 │   │   └── pitfalls.md       # 反模式避坑
 │   │
-│   └── workflows/             # 工作流
+│   └── flow/                  # 工作流
 │       ├── pre-market.md
 │       ├── post-market.md
 │       ├── high-pr-picker.md
 │       ├── trading-plan.md
-│       └── market-synthesis.md
+│       ├── market-synthesis.md
+│       └── integrated-expert.md
 │
 ├── scripts/                    # 执行脚本
 │   ├── config_manager.py      # 配置管理
@@ -96,12 +110,12 @@ a-shares-master/
 | **理解评级** | references/core/rating/ |
 | **分析股票** | references/core/four-dimensions.md |
 | **TGB情绪** | references/core/tgb-sentiment.md |
-| **选股** | references/guides/scenes.md, workflows/high-pr-picker.md |
+| **选股** | references/guides/scenes.md, flow/high-pr-picker.md |
 | **诊股** | references/guides/scenes.md, references/guides/anchors.md |
 | **风控扫描** | references/guides/rules.md, scripts/check_risk.py |
 | **制定交易计划** | scripts/trading_plan.py, references/guides/anchors.md |
-| **盘前分析** | scripts/pre_market.py, workflows/pre-market.md |
-| **盘后复盘** | scripts/post_market.py, workflows/post-market.md |
+| **盘前分析** | scripts/pre_market.py, flow/pre-market.md |
+| **盘后复盘** | scripts/post_market.py, flow/post-market.md |
 | **写报告** | references/guides/templates.md |
 | **避免错误** | references/guides/pitfalls.md |
 | **持续进化** | references/core/feedback-loop.md |
