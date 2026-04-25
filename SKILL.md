@@ -14,7 +14,7 @@ description: |
   
   【核心功能】
   - 四维分析法：消息/政策 → 情绪/资金 → 流动性/技术 → 风险/合规
-  - 双引擎驱动：MX 量化数据 + TGB 社区情绪
+  - 多源数据驱动：MX 量化数据 + TGB 社区情绪 + AkShare 公开数据 + 东方财富浏览器数据
   - 五大模块：盘前、盘中、盘后、选股、风控
   
   【不适用】
@@ -30,6 +30,8 @@ depends_on:
   - mx-finance-search       # 新闻/政策（必须）
   - mx-data                 # 市场数据（必须）
   - taoguba-hot            # 社区情绪（必须）
+  - akshare-stock          # AkShare 公开数据（必须）
+  - open-gstack-browser    # 浏览器工具（必须）
 
 env:
   - MX_APIKEY               # MX API 密钥
@@ -50,7 +52,7 @@ env:
 
 ```bash
 # 在终端执行
-for skill in mx-stocks-screener mx-finance-data mx-financial-assistant mx-finance-search mx-data taoguba-hot; do
+for skill in mx-stocks-screener mx-finance-data mx-financial-assistant mx-finance-search mx-data taoguba-hot akshare-stock open-gstack-browser; do
   if [ -d "$HOME/.claude/skills/$skill" ]; then
     echo "✅ $skill"
   else
@@ -69,6 +71,8 @@ done
 | `mx-finance-search` | `/install mx-finance-search` | 消息面 |
 | `mx-data` | `/install mx-data` | 市场数据 |
 | `taoguba-hot` | `/install taoguba-hot` | 情绪数据 |
+| `akshare-stock` | `/install akshare-stock` | AkShare 公开数据 |
+| `open-gstack-browser` | `/install open-gstack-browser` | 浏览器（东方财富数据） |
 
 ### 环境准备
 
@@ -94,8 +98,8 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 │  │ 消息/政策   │→ │ 情绪/资金   │→ │ 流动性/技术 │→ │风险/合规│ │
 │  └────────────┘  └────────────┘  └────────────┘  └────────┘ │
 ├─────────────────────────────────────────────────────────────┤
-│                     双引擎驱动                              │
-│           MX 量化数据        +        TGB 社区情绪           │
+│                     多源数据驱动                            │
+│    MX量化数据  │  TGB情绪  │  AkShare  │  东方财富(浏览器)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -120,7 +124,10 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 
 ### 维度A：消息/政策（News & Policy）
 
-**数据源**：`mx-finance-search`
+**数据源**：
+- `mx-finance-search` — MX 宏观与行业政策
+- **东方财富（浏览器）** — https://www.eastmoney.com/news/latest.html
+- `akshare` — 财经新闻、公告
 
 **分析重点**：
 - 宏观政策：央行货币政策、证监会公告、监管动向
@@ -137,7 +144,11 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 
 ### 维度B：情绪/资金（Sentiment & Capital）
 
-**数据源**：`taoguba-hot` + `mx-data`
+**数据源**：
+- `taoguba-hot` — 淘股吧散户情绪
+- `mx-data` — MX 资金流向
+- **东方财富（浏览器）** — 涨跌停、炸板、连板数据
+- **AkShare** — 北向资金、板块资金流
 
 **情绪指标**：
 | 指标 | 说明 | 信号 |
@@ -156,7 +167,10 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 
 ### 维度C：流动性/技术（Liquidity & Technical）
 
-**数据源**：`mx-finance-data`
+**数据源**：
+- `mx-finance-data` — MX 技术指标
+- **AkShare** — MA、MACD、KDJ、RSI、布林带
+- **东方财富（浏览器）** — 实时行情、成交明细、资金流入
 
 **成交量模式**：
 | 模式 | 阈值 | 策略含义 |
@@ -175,7 +189,10 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 
 ### 维度D：风险/合规（Risk & Compliance）
 
-**数据源**：`scripts/check_risk.py`（强制执行）
+**数据源**：
+- `scripts/check_risk.py` — 强制风控扫描
+- **东方财富（浏览器）** — 风险提示公告、立案调查、减持计划
+- **AkShare** — ST股、退市风险、财务风险
 
 **R3红线（绝对禁止）**：
 | 风险类型 | 描述 | 后果 |
@@ -191,6 +208,42 @@ source .env  # 或手动 export MX_APIKEY=xxx EM_API_KEY=xxx
 | 4月20-30日 | 年报+一季报窗口，高位股默认R3 |
 | 8月20-31日 | 中报窗口 |
 | 10月20-31日 | 三季报窗口 |
+
+---
+
+## 🌐 东方财富数据获取
+
+使用 `open-gstack-browser` 工具通过浏览器获取东方财富实时数据：
+
+**常用数据页面**：
+
+| 页面 | URL | 数据类型 |
+|------|-----|---------|
+| 实时行情 | https://quote.eastmoney.com | 实时价格、涨跌幅 |
+| 涨跌停 | https://quote.eastmoney.com/ztb | 涨停/跌停股票列表 |
+| 炸板股 | https://quote.eastmoney.com/zhuanti | 当日炸板股票 |
+| 资金流向 | https://data.eastmoney.com/zjlx | 主力/散户资金流向 |
+| 龙虎榜 | https://data.eastmoney.com/lhb | 营业部上榜股票 |
+| 新闻公告 | https://www.eastmoney.com/news/latest | 最新财经新闻 |
+| 风险公告 | https://www.eastmoney.com | 公司风险提示 |
+
+**浏览器操作示例**：
+
+```bash
+# 导航到东方财富涨跌停页面
+browser_navigate https://quote.eastmoney.com/ztb
+
+# 获取页面内容用于分析
+browser_get_content
+
+# 如需截取页面
+browser_screenshot
+```
+
+**数据交叉验证原则**：
+- MX/AkShare 数据与东方财富数据交叉验证
+- 涨跌停数据以东方财富为准
+- 资金流向以 MX 为准，东方财富作参考
 
 ---
 
