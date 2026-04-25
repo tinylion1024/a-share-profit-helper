@@ -9,7 +9,7 @@
 | 文件 | 内容 | 行数 |
 |------|------|------|
 | **[SKILL.md](../SKILL.md)** | 主索引，极简入口 | ~150 |
-| **[references/rating.md](rating.md)** | 四维评级体系 | ~250 |
+| **[references/rating/](rating/)** | 四维评级体系 | 机会/安全/确定性/舒适度 |
 | **[references/rules.md](rules.md)** | 七条硬规则 | ~150 |
 | **[references/scenes.md](scenes.md)** | 15场景体系 | ~150 |
 | **[references/four-dimensions.md](four-dimensions.md)** | 四维分析法 | ~200 |

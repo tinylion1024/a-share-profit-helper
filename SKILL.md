@@ -451,7 +451,7 @@ Step 5: 追踪反馈 → 复盘记录
 安全⭐ ≥ 3 + 机会⭐ ≥ 3 + 确定性⭐ ≥ 3 → 买/可以买
 ```
 
-> [references/rating.md](references/rating.md) - 详细定义、R3红线、综合评级计算
+> [references/rating/](references/rating/) - 四维详解（机会/安全/确定性/舒适度）
 
 ---
 
