@@ -1,0 +1,64 @@
+{
+  "_version": "1.0",
+  "_comment": "配置文件，首次运行时会询问用户并生成此文件",
+
+  "user": {
+    "name": "散户",
+    "level": "beginner",
+    "_comment": {
+      "level": "用户级别: beginner(新手) / intermediate(有经验) / advanced(高手)"
+    }
+  },
+
+  "account": {
+    "total_fund": 100000,
+    "_comment": {
+      "total_fund": "总资金，单位：元"
+    }
+  },
+
+  "trading": {
+    "max_position_per_stock": 0.3,
+    "max_total_position": 0.5,
+    "stop_loss_rate": 0.07,
+    "profit_target_multiplier": 3,
+    "_comment": {
+      "max_position_per_stock": "单只股票最大仓位比例 (0.3 = 30%)",
+      "max_total_position": "总仓位最大比例 (0.5 = 50%)",
+      "stop_loss_rate": "止损比例 (0.07 = 7%)",
+      "profit_target_multiplier": "止盈为目标止损距离的倍数"
+    }
+  },
+
+  "preferences": {
+    "default_weight_opportunity": 0.3,
+    "default_weight_safety": 0.25,
+    "default_weight_certainty": 0.25,
+    "default_weight_comfort": 0.2,
+    "_comment": {
+      "default_weight_*": "四维评级默认权重，总和应为1.0"
+    }
+  },
+
+  "filters": {
+    "min_daily_volume": 50000000,
+    "min_price": 1,
+    "max_price": 500,
+    "_comment": {
+      "min_daily_volume": "最小日成交额 (元)",
+      "min_price": "最低股价 (元)",
+      "max_price": "最高股价 (元)"
+    }
+  },
+
+  "display": {
+    "show_probability": true,
+    "show_risk_analysis": true,
+    "show_detailed_reasoning": true,
+    "_comment": {
+      "show_probability": "是否显示概率预测",
+      "show_risk_analysis": "是否显示风险分析",
+      "show_detailed_reasoning": "是否显示详细推理过程"
+    }
+  }
+}

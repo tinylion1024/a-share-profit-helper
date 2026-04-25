@@ -1,1 +1,4 @@
 .DS_Store
+
+# 用户配置（运行时生成）
+config.json
