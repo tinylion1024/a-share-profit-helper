@@ -91,7 +91,7 @@ env:
 | 消息🔴 + 情绪🔴 + 技术🔴 | 弱势下跌 | 休息/空仓 |
 | 消息🟡 + 情绪🟡 + 技术🟡 | 震荡整理 | 高抛低吸 |
 
-> 详细分析流程：[references/four-dimensions.md](references/four-dimensions.md)
+> 详细分析流程：[references/core/four-dimensions.md](references/core/four-dimensions.md)
 
 ---
 
@@ -125,7 +125,7 @@ env:
 2.5+ → ⭐⭐⭐ 观望
 ```
 
-> 详细评分规则：[references/rating/](references/rating/)
+> 详细评分规则：[references/core/rating/](references/core/rating/)
 
 ---
 
@@ -258,7 +258,7 @@ env:
 | 评级偏差3次 | 调整权重 |
 | 发现新规律 | 更新规则 |
 
-> 详细内容：[references/feedback-loop.md](references/feedback-loop.md)
+> 详细内容：[references/core/feedback-loop.md](references/core/feedback-loop.md)
 
 ---
 
@@ -266,12 +266,12 @@ env:
 
 | 文档 | 内容 |
 |------|------|
-| [references/rating/](references/rating/) | 四维评分详解 |
-| [references/four-dimensions.md](references/four-dimensions.md) | 三维分析详解 |
-| [references/rules.md](references/rules.md) | 硬规则详解 |
-| [references/scenes.md](references/scenes.md) | 场景体系 |
-| [references/tgb-sentiment.md](references/tgb-sentiment.md) | TGB情绪分析 |
-| [references/anchors.md](references/anchors.md) | 买卖锚点 |
+| [references/core/rating/](references/core/rating/) | 四维评分详解 |
+| [references/core/four-dimensions.md](references/core/four-dimensions.md) | 三维分析详解 |
+| [references/guides/rules.md](references/guides/rules.md) | 硬规则详解 |
+| [references/guides/scenes.md](references/guides/scenes.md) | 场景体系 |
+| [references/core/tgb-sentiment.md](references/core/tgb-sentiment.md) | TGB情绪分析 |
+| [references/guides/anchors.md](references/guides/anchors.md) | 买卖锚点 |
 | [references/install.md](references/install.md) | 安装指南 |
 
 ---

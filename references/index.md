@@ -6,25 +6,25 @@
 
 ## 核心文档
 
-| 文件 | 内容 | 行数 |
+| 文件 | 内容 | 路径 |
 |------|------|------|
-| **[SKILL.md](../SKILL.md)** | 主索引，极简入口 | ~150 |
-| **[references/rating/](rating/)** | 四维评级体系 | 机会/安全/确定性/舒适度 |
-| **[references/rules.md](rules.md)** | 七条硬规则 | ~150 |
-| **[references/scenes.md](scenes.md)** | 15场景体系 | ~150 |
-| **[references/four-dimensions.md](four-dimensions.md)** | 四维分析法 | ~200 |
+| **[SKILL.md](../SKILL.md)** | 主索引，极简入口 | SKILL.md |
+| **[core/rating/](core/rating/)** | 四维评级体系 | references/core/rating/ |
+| **[core/four-dimensions.md](core/four-dimensions.md)** | 三维市场分析 | references/core/ |
+| **[guides/rules.md](guides/rules.md)** | 七条硬规则 | references/guides/ |
+| **[guides/scenes.md](guides/scenes.md)** | 15场景体系 | references/guides/ |
+| **[core/tgb-sentiment.md](core/tgb-sentiment.md)** | TGB情绪分析 | references/core/ |
+| **[core/feedback-loop.md](core/feedback-loop.md)** | 反馈循环 | references/core/ |
 
 ---
 
 ## 交易指南
 
-| 文件 | 内容 |
-|------|------|
-| **[references/anchors.md](anchors.md)** | 买卖锚点、仓位模型、止损原则 |
-| **[references/templates.md](templates.md)** | 操作/学习/进化报告模板 |
-| **[references/pitfalls.md](pitfalls.md)** | 散户亏损反模式清单 |
-| **[references/feedback-loop.md](feedback-loop.md)** | 反馈循环与进化机制 |
-| **[references/tgb-sentiment.md](tgb-sentiment.md)** | TGB情绪分析、大V观点整合 |
+| 文件 | 内容 | 路径 |
+|------|------|------|
+| **[guides/anchors.md](guides/anchors.md)** | 买卖锚点、仓位模型、止损原则 | references/guides/ |
+| **[guides/templates.md](guides/templates.md)** | 操作/学习/进化报告模板 | references/guides/ |
+| **[guides/pitfalls.md](guides/pitfalls.md)** | 散户亏损反模式清单 | references/guides/ |
 
 ---
 
@@ -39,41 +39,33 @@ a-shares-master/
 │
 ├── references/
 │   ├── index.md               # 本索引页
-│   ├── install.md            # 安装指南
-│   ├── rating.md              # 四维评级体系
-│   ├── rules.md               # 硬规则
-│   ├── scenes.md              # 场景体系
-│   ├── four-dimensions.md     # 四维分析法
-│   ├── anchors.md             # 操作锚点
-│   ├── templates.md           # 报告模板
-│   ├── pitfalls.md            # 反模式
-│   ├── feedback-loop.md      # 反馈循环
-│   ├── tgb-sentiment.md      # TGB情绪分析
+│   ├── install.md             # 安装指南
+│   ├── CHANGELOG.md           # 变更日志
 │   │
-│   ├── guides/                # 架构指南
-│   │   ├── ARCHITECTURE.md
-│   │   ├── MODULE_GUIDE.md
-│   │   └── PLUGIN_GUIDE.md
+│   ├── core/                  # 核心体系
+│   │   ├── rating/            # 四维评级（机会/安全/确定/舒适）
+│   │   │   ├── README.md
+│   │   │   ├── opportunity.md
+│   │   │   ├── safety.md
+│   │   │   ├── certainty.md
+│   │   │   └── comfort.md
+│   │   ├── four-dimensions.md # 三维市场分析
+│   │   ├── tgb-sentiment.md  # TGB情绪分析
+│   │   └── feedback-loop.md  # 反馈循环
 │   │
-│   ├── workflows/             # 工作流
-│   │   ├── pre-market.md
-│   │   ├── post-market.md
-│   │   ├── high-pr-picker.md
-│   │   ├── trading-plan.md
-│   │   └── market-synthesis.md
+│   ├── guides/                # 操作指南
+│   │   ├── rules.md          # 七条硬规则
+│   │   ├── anchors.md        # 买卖锚点
+│   │   ├── scenes.md         # 15场景体系
+│   │   ├── templates.md      # 报告模板
+│   │   └── pitfalls.md       # 反模式避坑
 │   │
-│   ├── trading/               # 交易相关
-│   │   ├── basic-strategies.md
-│   │   ├── money-management.md
-│   │   ├── sentiment-analysis.md
-│   │   ├── a-share-rules.md
-│   │   ├── pitfalls.md
-│   │   └── industry-codes.md
-│   │
-│   └── cases/                 # 案例库
-│       ├── 成功案例/
-│       ├── 失败案例/
-│       └── 市场规律/
+│   └── workflows/             # 工作流
+│       ├── pre-market.md
+│       ├── post-market.md
+│       ├── high-pr-picker.md
+│       ├── trading-plan.md
+│       └── market-synthesis.md
 │
 ├── scripts/                    # 执行脚本
 │   ├── config_manager.py      # 配置管理
@@ -101,18 +93,18 @@ a-shares-master/
 |------|---------|
 | **了解系统** | SKILL.md |
 | **安装配置** | references/install.md |
-| **理解评级** | references/rating.md |
-| **分析股票** | references/four-dimensions.md |
-| **TGB情绪** | references/tgb-sentiment.md |
-| **选股** | references/scenes.md, workflows/high-pr-picker.md |
-| **诊股** | references/scenes.md, references/anchors.md |
-| **风控扫描** | references/rules.md, scripts/check_risk.py |
-| **制定交易计划** | scripts/trading_plan.py, references/anchors.md |
+| **理解评级** | references/core/rating/ |
+| **分析股票** | references/core/four-dimensions.md |
+| **TGB情绪** | references/core/tgb-sentiment.md |
+| **选股** | references/guides/scenes.md, workflows/high-pr-picker.md |
+| **诊股** | references/guides/scenes.md, references/guides/anchors.md |
+| **风控扫描** | references/guides/rules.md, scripts/check_risk.py |
+| **制定交易计划** | scripts/trading_plan.py, references/guides/anchors.md |
 | **盘前分析** | scripts/pre_market.py, workflows/pre-market.md |
 | **盘后复盘** | scripts/post_market.py, workflows/post-market.md |
-| **写报告** | references/templates.md |
-| **避免错误** | references/pitfalls.md |
-| **持续进化** | references/feedback-loop.md |
+| **写报告** | references/guides/templates.md |
+| **避免错误** | references/guides/pitfalls.md |
+| **持续进化** | references/core/feedback-loop.md |
 
 ---
 
