@@ -10,6 +10,32 @@ import os
 from pathlib import Path
 
 
+# 投资风格预设
+STYLE_PRESETS = {
+    "conservative": {
+        "name": "保守型",
+        "max_position_per_stock": 0.2,
+        "max_total_position": 0.3,
+        "stop_loss_rate": 0.05,
+        "profit_target_multiplier": 2.5
+    },
+    "balanced": {
+        "name": "平衡型",
+        "max_position_per_stock": 0.3,
+        "max_total_position": 0.5,
+        "stop_loss_rate": 0.07,
+        "profit_target_multiplier": 3
+    },
+    "aggressive": {
+        "name": "激进型",
+        "max_position_per_stock": 0.4,
+        "max_total_position": 0.7,
+        "stop_loss_rate": 0.10,
+        "profit_target_multiplier": 4
+    }
+}
+
+
 class ConfigManager:
     """配置管理器"""
 
@@ -43,50 +69,48 @@ class ConfigManager:
 
         config = {
             "_version": "1.0",
-            "_created_at": str(Path(__file__).parent.parent / ".git" / "HEAD"),
+            "env": {},
             "user": {},
-            "account": {},
             "trading": {},
-            "preferences": {},
             "filters": {},
             "display": {}
         }
 
+        # 环境配置
+        print("\n【环境配置】")
+        mx_key = input("  MX API 密钥 (可稍后配置): ").strip()
+        config["env"]["mx_apikey"] = mx_key
+
+        em_key = input("  东方财富 API 密钥 (可稍后配置): ").strip()
+        config["env"]["em_apikey"] = em_key
+
+        cache_dir = input("  数据缓存目录 (默认: /tmp/a_shares_cache): ").strip()
+        config["env"]["data_cache_dir"] = cache_dir or "/tmp/a_shares_cache"
+
         # 用户信息
-        print("\n【用户信息】")
+        print("\n【用户偏好】")
         name = input("  昵称 (默认: 散户): ").strip() or "散户"
         config["user"]["name"] = name
 
-        level = input("  经验级别 [1=新手/2=有经验/3=高手] (默认: 1): ").strip() or "1"
-        levels = {"1": "beginner", "2": "intermediate", "3": "advanced"}
-        config["user"]["level"] = levels.get(level, "beginner")
+        print("\n  投资风格:")
+        print("    1. 保守型 - 仓位低(30%)、止损严(5%)、收益稳")
+        print("    2. 平衡型 - 仓位中(50%)、止损中(7%)、收益均衡")
+        print("    3. 激进型 - 仓位高(70%)、止损宽(10%)、收益高")
+        style = input("  选择风格 [1/2/3, 默认: 2]: ").strip() or "2"
 
-        # 账户信息
-        print("\n【账户信息】")
-        fund = input("  总资金 (元, 默认: 100000): ").strip() or "100000"
-        try:
-            config["account"]["total_fund"] = int(fund)
-        except ValueError:
-            config["account"]["total_fund"] = 100000
+        styles = {"1": "conservative", "2": "balanced", "3": "aggressive"}
+        style_key = styles.get(style, "balanced")
+        config["user"]["style"] = style_key
 
-        # 交易设置
-        print("\n【交易设置】")
-
-        max_pos = input("  单只最大仓位 (默认: 30%): ").strip() or "30"
-        config["trading"]["max_position_per_stock"] = float(max_pos) / 100
-
-        max_total = input("  总仓位最大比例 (默认: 50%): ").strip() or "50"
-        config["trading"]["max_total_position"] = float(max_total) / 100
-
-        stop_loss = input("  止损比例 (默认: 7%): ").strip() or "7"
-        config["trading"]["stop_loss_rate"] = float(stop_loss) / 100
-
-        target_mult = input("  止盈为目标止损距离倍数 (默认: 3): ").strip() or "3"
-        config["trading"]["profit_target_multiplier"] = float(target_mult)
+        # 应用风格预设
+        preset = STYLE_PRESETS[style_key]
+        config["trading"]["max_position_per_stock"] = preset["max_position_per_stock"]
+        config["trading"]["max_total_position"] = preset["max_total_position"]
+        config["trading"]["stop_loss_rate"] = preset["stop_loss_rate"]
+        config["trading"]["profit_target_multiplier"] = preset["profit_target_multiplier"]
 
         # 筛选设置
-        print("\n【筛选设置】")
-
+        print("\n【筛选偏好】")
         min_vol = input("  最小日成交额 (默认: 5000万): ").strip() or "50000000"
         config["filters"]["min_daily_volume"] = int(min_vol)
 
@@ -97,7 +121,7 @@ class ConfigManager:
         config["filters"]["max_price"] = float(max_price)
 
         # 展示设置
-        print("\n【展示设置】")
+        print("\n【展示偏好】")
         show_prob = input("  显示概率预测? [y/n, 默认: y]: ").strip() or "y"
         config["display"]["show_probability"] = show_prob.lower() == "y"
 
@@ -131,19 +155,18 @@ class ConfigManager:
         """使用默认配置"""
         self.config = {
             "_version": "1.0",
-            "user": {"name": "散户", "level": "beginner"},
-            "account": {"total_fund": 100000},
+            "env": {
+                "mx_apikey": "",
+                "em_apikey": "",
+                "data_cache_dir": "/tmp/a_shares_cache",
+                "log_level": "INFO"
+            },
+            "user": {"name": "散户", "style": "balanced"},
             "trading": {
                 "max_position_per_stock": 0.3,
                 "max_total_position": 0.5,
                 "stop_loss_rate": 0.07,
                 "profit_target_multiplier": 3
-            },
-            "preferences": {
-                "default_weight_opportunity": 0.3,
-                "default_weight_safety": 0.25,
-                "default_weight_certainty": 0.25,
-                "default_weight_comfort": 0.2
             },
             "filters": {
                 "min_daily_volume": 50000000,
@@ -158,10 +181,7 @@ class ConfigManager:
         }
 
     def get(self, key_path: str, default=None):
-        """
-        获取配置值，支持点号路径
-        例如: config.get("trading.max_position_per_stock")
-        """
+        """获取配置值，支持点号路径"""
         keys = key_path.split(".")
         value = self.config
         for key in keys:
@@ -171,9 +191,30 @@ class ConfigManager:
                 return default
         return value
 
-    def get_user_fund(self) -> int:
-        """获取用户总资金"""
-        return self.get("account.total_fund", 100000)
+    def get_mx_apikey(self) -> str:
+        """获取 MX API 密钥"""
+        return self.get("env.mx_apikey", "")
+
+    def get_em_apikey(self) -> str:
+        """获取东方财富 API 密钥"""
+        return self.get("env.em_apikey", "")
+
+    def get_cache_dir(self) -> str:
+        """获取缓存目录"""
+        return self.get("env.data_cache_dir", "/tmp/a_shares_cache")
+
+    def get_user_name(self) -> str:
+        """获取用户昵称"""
+        return self.get("user.name", "散户")
+
+    def get_user_style(self) -> str:
+        """获取投资风格"""
+        return self.get("user.style", "balanced")
+
+    def get_style_preset(self) -> dict:
+        """获取风格预设"""
+        style = self.get_user_style()
+        return STYLE_PRESETS.get(style, STYLE_PRESETS["balanced"])
 
     def get_max_position_per_stock(self) -> float:
         """获取单只最大仓位比例"""
@@ -218,9 +259,11 @@ _config_instance = None
 if __name__ == "__main__":
     # 测试配置管理器
     config = get_config()
+    style = config.get_style_preset()
+
     print(f"\n当前配置:")
-    print(f"  用户: {config.get('user.name')}")
-    print(f"  资金: {config.get_user_fund()} 元")
+    print(f"  用户: {config.get_user_name()}")
+    print(f"  风格: {config.get_user_style()} ({style['name']})")
     print(f"  单只仓位: {config.get_max_position_per_stock()*100}%")
     print(f"  总仓位: {config.get_max_total_position()*100}%")
     print(f"  止损: {config.get_stop_loss_rate()*100}%")

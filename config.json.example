@@ -1,19 +1,25 @@
 {
   "_version": "1.0",
-  "_comment": "配置文件，首次运行时会询问用户并生成此文件",
+  "_comment": "用户配置文件，首次运行后自动生成",
 
-  "user": {
-    "name": "散户",
-    "level": "beginner",
+  "env": {
+    "mx_apikey": "",
+    "em_apikey": "",
+    "data_cache_dir": "/tmp/a_shares_cache",
+    "log_level": "INFO",
     "_comment": {
-      "level": "用户级别: beginner(新手) / intermediate(有经验) / advanced(高手)"
+      "mx_apikey": "MX API 密钥",
+      "em_apikey": "东方财富 API 密钥",
+      "data_cache_dir": "数据缓存目录",
+      "log_level": "日志级别: DEBUG/INFO/WARNING/ERROR"
     }
   },
 
-  "account": {
-    "total_fund": 100000,
+  "user": {
+    "name": "散户",
+    "style": "balanced",
     "_comment": {
-      "total_fund": "总资金，单位：元"
+      "style": "投资风格: conservative(保守)/balanced(平衡)/aggressive(激进)"
     }
   },
 
@@ -23,20 +29,10 @@
     "stop_loss_rate": 0.07,
     "profit_target_multiplier": 3,
     "_comment": {
-      "max_position_per_stock": "单只股票最大仓位比例 (0.3 = 30%)",
-      "max_total_position": "总仓位最大比例 (0.5 = 50%)",
-      "stop_loss_rate": "止损比例 (0.07 = 7%)",
-      "profit_target_multiplier": "止盈为目标止损距离的倍数"
-    }
-  },
-
-  "preferences": {
-    "default_weight_opportunity": 0.3,
-    "default_weight_safety": 0.25,
-    "default_weight_certainty": 0.25,
-    "default_weight_comfort": 0.2,
-    "_comment": {
-      "default_weight_*": "四维评级默认权重，总和应为1.0"
+      "max_position_per_stock": "单只最大仓位 (0.3=30%)",
+      "max_total_position": "总仓位最大 (0.5=50%)",
+      "stop_loss_rate": "止损比例 (0.07=7%)",
+      "profit_target_multiplier": "止盈为目标止损距离倍数"
     }
   },
 
@@ -54,11 +50,6 @@
   "display": {
     "show_probability": true,
     "show_risk_analysis": true,
-    "show_detailed_reasoning": true,
-    "_comment": {
-      "show_probability": "是否显示概率预测",
-      "show_risk_analysis": "是否显示风险分析",
-      "show_detailed_reasoning": "是否显示详细推理过程"
-    }
+    "show_detailed_reasoning": true
   }
 }
