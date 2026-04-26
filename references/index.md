@@ -33,7 +33,15 @@
 
 ## 工作流SOP
 
-> 15个场景SOP已整合到 flow/make-money/, flow/learn/, flow/evolve/ 目录
+> 每个场景SOP开始前，必须先完成3个公共SOP
+
+**公共SOP（前置必做）**
+
+| 文件 | 目的 |
+|------|------|
+| [flow/common/01-clarify-needs.md](flow/common/01-clarify-needs.md) | 澄清用户需求，确认场景类型和必要信息 |
+| [flow/common/02-define-time-window.md](flow/common/02-define-time-window.md) | 明确时间窗口，确定最近交易日和时段 |
+| [flow/common/03-get-data.md](flow/common/03-get-data.md) | 获取可信数据，多源交叉验证 |
 
 **赚钱引擎SOP（6个）**
 
@@ -104,12 +112,10 @@ a-shares-master/
 │   │
 │   └── flow/                  # 工作流SOP
 │       ├── README.md          # SOP总索引
-│       ├── pre-market.md
-│       ├── post-market.md
-│       ├── trading-plan.md
-│       ├── high-pr-picker.md
-│       ├── market-synthesis.md
-│       ├── integrated-expert.md
+│       ├── common/            # 公共SOP（前置）
+│       │   ├── 01-clarify-needs.md
+│       │   ├── 02-define-time-window.md
+│       │   └── 03-get-data.md
 │       ├── make-money/        # 赚钱引擎(6)
 │       ├── learn/             # 学习引擎(6)
 │       └── evolve/            # 进化引擎(3)
