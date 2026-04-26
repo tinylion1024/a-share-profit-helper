@@ -30,20 +30,16 @@
 
 ---
 
-## 工作流
+## 工作流SOP
 
-| 目录 | 内容 |
-|------|------|
-| **[flow/README.md](flow/README.md)** | SOP总索引，15场景导航 |
-| **[flow/pre-market.md](flow/pre-market.md)** | 盘前分析 |
-| **[flow/post-market.md](flow/post-market.md)** | 盘后复盘 |
+> 15个场景SOP已整合到 flow/make-money/, flow/learn/, flow/evolve/ 目录
 
 **赚钱引擎SOP（6个）**
 
 | 文件 | 场景 |
 |------|------|
-| [flow/make-money/stock-picker.md](flow/make-money/stock-picker.md) | 选股 |
-| [flow/make-money/stock-diagnosis.md](flow/make-money/stock-diagnosis.md) | 诊股 |
+| [flow/make-money/stock-picker.md](flow/make-money/stock-picker.md) | 选股（含高PR选股） |
+| [flow/make-money/stock-diagnosis.md](flow/make-money/stock-diagnosis.md) | 诊股（含综合专家） |
 | [flow/make-money/position-diagnosis.md](flow/make-money/position-diagnosis.md) | 持仓诊断 |
 | [flow/make-money/unstuck.md](flow/make-money/unstuck.md) | 解套 |
 | [flow/make-money/stop-loss.md](flow/make-money/stop-loss.md) | 止损 |
@@ -53,8 +49,8 @@
 
 | 文件 | 场景 |
 |------|------|
-| [flow/learn/market-outlook.md](flow/learn/market-outlook.md) | 大盘前瞻 |
-| [flow/learn/market-summary.md](flow/learn/market-summary.md) | 大盘总结 |
+| [flow/learn/market-outlook.md](flow/learn/market-outlook.md) | 大盘前瞻（含盘前分析、交易计划） |
+| [flow/learn/market-summary.md](flow/learn/market-summary.md) | 大盘总结（含盘后复盘） |
 | [flow/learn/daily-review.md](flow/learn/daily-review.md) | 每日复盘 |
 | [flow/learn/case-analysis.md](flow/learn/case-analysis.md) | 案例拆解 |
 | [flow/learn/error-reflection.md](flow/learn/error-reflection.md) | 错误反思 |
@@ -67,6 +63,8 @@
 | [flow/evolve/case-record.md](flow/evolve/case-record.md) | 案例记录 |
 | [flow/evolve/rule-update.md](flow/evolve/rule-update.md) | 规律更新 |
 | [flow/evolve/model-tune.md](flow/evolve/model-tune.md) | 模型优化 |
+
+> 完整索引：[flow/README.md](flow/README.md)
 
 ---
 
