@@ -50,16 +50,22 @@ export IWENCAI_API_KEY=【你的API_KEY】
 
 ## 优先级规则
 
+### 数据优先级（Fallback链）
+
+```
+问财SKILL > MX（妙想）API > AkShare
+```
+
 ### 硬数据（必须用官方/Iwencai）
 
-| 数据类型 | 首选 | 备选 |
-|----------|------|------|
-| 行情数据 | Iwencai(market-data-query) | AkShare + 东财 |
-| 财务数据 | Iwencai(financial-data-query) | 公司公告 |
-| 选股筛选 | Iwencai(a-share-screener) | AkShare |
-| 研报新闻 | Iwencai(research-report-search/news-search) | 交易所 |
-| 资金流向 | 东财Level2、大智慧 | AkShare |
-| 龙虎榜 | 交易所官方 | Iwencai |
+| 数据类型 | 首选 | 备选1 | 备选2 |
+|----------|------|--------|--------|
+| 行情数据 | Iwencai | MX | AkShare |
+| 财务数据 | Iwencai | MX | 公司公告 |
+| 选股筛选 | Iwencai | MX | AkShare |
+| 研报新闻 | Iwencai | MX | 交易所 |
+| 资金流向 | Iwencai | MX | AkShare |
+| 龙虎榜 | Iwencai | 交易所官方 | - |
 
 ### 软数据（可参考社区）
 
@@ -73,13 +79,12 @@ export IWENCAI_API_KEY=【你的API_KEY】
 
 ## 数据获取工具
 
-| 工具 | 数据类型 | 优先级 |
-|------|----------|--------|
-| **Iwencai系列** | 行情/财务/选股/研报 | 首选 |
-| `mx-data` | 行情、资金、指标 | 备选 |
-| `akshare-stock` | 实时行情、财务 | 备选 |
-| `mx-finance-search` | 公告、新闻搜索 | 补充 |
-| `taoguba-hot` | 社区情绪热度 | 辅助 |
+| 优先级 | 工具 | 数据类型 |
+|--------|------|----------|
+| **1st** | Iwencai系列 | 行情/财务/选股/研报 |
+| **2nd** | MX系列（mx-data, mx-finance-*） | 行情、资金、搜索 |
+| **3rd** | AkShare（akshare-stock） | 实时行情、财务 |
+| **辅助** | taoguba-hot | 社区情绪热度 |
 
 ---
 

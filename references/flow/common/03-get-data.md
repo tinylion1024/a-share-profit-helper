@@ -68,24 +68,29 @@ export IWENCAI_API_KEY=【你的API_KEY】
 | 大盘分析 | 指数、成交额，资金流向 | Iwencai(指数) + AkShare |
 | 复盘 | 当日所有行情数据 | Iwencai(行情) + AkShare |
 
-### Step 2：按优先级获取
+### Step 2：按优先级获取（Fallback链）
 
 ```
+问财SKILL > MX（妙想）API > AkShare
+
 1. 行情数据：
    - Iwencai: market-data-query（首选）
-   - AkShare + 东财（备选）
+   - MX: mx-data（备选）
+   - AkShare + 东财（最后备选）
 
 2. 财务数据：
-   - Iwencai: financial-data-query
-   - 公告: announcement-search
+   - Iwencai: financial-data-query（首选）
+   - MX: mx-finance-data（备选）
 
 3. 选股筛选：
-   - Iwencai: a-share-screener
-   - 板块: sector-screener
+   - Iwencai: a-share-screener（首选）
+   - Iwencai: sector-screener（板块）
+   - MX: mx-stocks-screener（备选）
 
 4. 研报新闻：
    - Iwencai: research-report-search
    - Iwencai: news-search
+   - MX: mx-finance-search（备选）
 
 5. 情绪数据（补充）：
    - taoguba-hot（TGB热度）
