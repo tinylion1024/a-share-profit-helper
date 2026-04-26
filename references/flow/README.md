@@ -9,15 +9,15 @@
 | 场景 | 文件 | 触发词 |
 |------|------|--------|
 | **赚钱引擎** | | |
-| 选股 | [make-money/stock-picker.md](make-money/stock-picker.md) | 什么能赚钱/推荐股票 |
+| 选股 | [make-money/stock-picker.md](make-money/stock-picker.md) | 什么能赚钱/推荐股票/高PR选股 |
 | 诊股 | [make-money/stock-diagnosis.md](make-money/stock-diagnosis.md) | 能买XXX吗/帮我看看 |
 | 持仓诊断 | [make-money/position-diagnosis.md](make-money/position-diagnosis.md) | 要不要卖/持仓怎么办 |
 | 解套 | [make-money/unstuck.md](make-money/unstuck.md) | 被套了/怎么解套 |
 | 止损 | [make-money/stop-loss.md](make-money/stop-loss.md) | 亏多少走/止损设多少 |
 | 止盈 | [make-money/take-profit.md](make-money/take-profit.md) | 赚多少跑/怎么分批卖 |
 | **学习引擎** | | |
-| 大盘前瞻 | [learn/market-outlook.md](learn/market-outlook.md) | 今天怎么看/大盘展望 |
-| 大盘总结 | [learn/market-summary.md](learn/market-summary.md) | 为什么涨/跌 |
+| 大盘前瞻 | [learn/market-outlook.md](learn/market-outlook.md) | 今天怎么看/大盘展望/制定交易计划 |
+| 大盘总结 | [learn/market-summary.md](learn/market-summary.md) | 为什么涨/跌/帮我复盘 |
 | 每日复盘 | [learn/daily-review.md](learn/daily-review.md) | 操作对吗/帮我复盘 |
 | 案例拆解 | [learn/case-analysis.md](learn/case-analysis.md) | 为什么涨/为什么跌 |
 | 错误反思 | [learn/error-reflection.md](learn/error-reflection.md) | 为什么亏/怎么避免 |
@@ -40,8 +40,8 @@
 | 用户需求 | 跳转SOP |
 |----------|---------|
 | 不知道买什么 | [stock-picker.md](make-money/stock-picker.md) |
-| 纠结要不要买 | [stock-diagnosis.md](make-money/stock-diagnosis.md) |
-| 纠结要不要卖 | [position-diagnosis.md](make-money/position-diagnosis.md) |
+| 纠结买不买 | [stock-diagnosis.md](make-money/stock-diagnosis.md) |
+| 纠结卖不卖 | [position-diagnosis.md](make-money/position-diagnosis.md) |
 | 被套了怎么办 | [unstuck.md](make-money/unstuck.md) |
 | 亏多少必须走 | [stop-loss.md](make-money/stop-loss.md) |
 | 赚多少要跑 | [take-profit.md](make-money/take-profit.md) |
@@ -64,21 +64,6 @@
 | 记录这笔交易 | [case-record.md](evolve/case-record.md) |
 | 发现新规律 | [rule-update.md](evolve/rule-update.md) |
 | 调整参数 | [model-tune.md](evolve/model-tune.md) |
-
----
-
-## 通用工作流
-
-另有通用工作流（非场景定制）：
-
-| 文件 | 用途 |
-|------|------|
-| [pre-market.md](../flow/pre-market.md) | 盘前分析 |
-| [post-market.md](../flow/post-market.md) | 盘后复盘 |
-| [trading-plan.md](../flow/trading-plan.md) | 交易计划 |
-| [high-pr-picker.md](../flow/high-pr-picker.md) | 高PR选股 |
-| [market-synthesis.md](../flow/market-synthesis.md) | 市场综合 |
-| [integrated-expert.md](../flow/integrated-expert.md) | 综合专家 |
 
 ---
 
