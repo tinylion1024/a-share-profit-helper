@@ -9,26 +9,65 @@
 | 类别 | 来源 | 可靠性 | 用途 |
 |------|------|--------|------|
 | **官方** | 东方财富、同花顺、交易所 | ⭐⭐⭐⭐⭐ | 行情、公告、财务 |
+| **Iwencai** | 问财API | ⭐⭐⭐⭐⭐ | 选股、财务、研报、新闻 |
 | **准官方** | Wind、Choice、彭博 | ⭐⭐⭐⭐⭐ | 机构数据 |
 | **社区** | 淘股吧、微博V、雪球 | ⭐⭐⭐ | 情绪、观点 |
 | **小众** | 股吧、论坛、消息群 | ⭐⭐ | 参考，慎用 |
 
 ---
 
+## Iwencai数据源
+
+### Iwencai技能清单（需安装）
+
+| 技能 | 数据类型 |
+|------|----------|
+| market-data-query | 行情数据 |
+| financial-data-query | 财务数据 |
+| a-share-screener | A股选股 |
+| sector-screener | 板块选股 |
+| research-report-search | 研报搜索 |
+| announcement-search | 公告搜索 |
+| news-search | 新闻搜索 |
+| macro-data-query | 宏观数据 |
+| industry-data-query | 行业数据 |
+| event-data-query | 事件数据 |
+| basic-info-query | 基本资料 |
+| index-data-query | 指数数据 |
+| convertible-bond-screener | 可转债选股 |
+| etf-screener | ETF选股 |
+| fund-screener | 基金选股 |
+| futures-options-data-query | 期货期权数据 |
+
+### Iwencai环境变量
+
+```bash
+export IWENCAI_BASE_URL=https://openapi.iwencai.com
+export IWENCAI_API_KEY=【你的API_KEY】
+```
+
+---
+
 ## 优先级规则
 
-### 硬数据（必须用官方/准官方）
+### 硬数据（必须用官方/Iwencai）
 
-- 行情数据：东方财富、同花顺
-- 财务数据：公司公告、交易所
-- 资金流向：东财Level2、大智慧
-- 龙虎榜：交易所官方
+| 数据类型 | 首选 | 备选 |
+|----------|------|------|
+| 行情数据 | Iwencai(market-data-query) | AkShare + 东财 |
+| 财务数据 | Iwencai(financial-data-query) | 公司公告 |
+| 选股筛选 | Iwencai(a-share-screener) | AkShare |
+| 研报新闻 | Iwencai(research-report-search/news-search) | 交易所 |
+| 资金流向 | 东财Level2、大智慧 | AkShare |
+| 龙虎榜 | 交易所官方 | Iwencai |
 
 ### 软数据（可参考社区）
 
-- 情绪热度：淘股吧热门
-- 大V观点：需交叉验证
-- 消息传言：仅作提醒，不作依据
+| 数据类型 | 来源 |
+|----------|------|
+| 情绪热度 | 淘股吧热门 |
+| 大V观点 | 雪球、微博（需交叉验证） |
+| 消息传言 | 仅作提醒，不作依据 |
 
 ---
 
@@ -36,8 +75,9 @@
 
 | 工具 | 数据类型 | 优先级 |
 |------|----------|--------|
-| `mx-data` | 行情、资金、指标 | 首选 |
-| `akshare-stock` | 实时行情、财务 | 首选 |
+| **Iwencai系列** | 行情/财务/选股/研报 | 首选 |
+| `mx-data` | 行情、资金、指标 | 备选 |
+| `akshare-stock` | 实时行情、财务 | 备选 |
 | `mx-finance-search` | 公告、新闻搜索 | 补充 |
 | `taoguba-hot` | 社区情绪热度 | 辅助 |
 
@@ -78,7 +118,7 @@
 
 ### ✅ 正确做法
 
-- 优先使用 AkShare + 东财双源
+- 优先使用 Iwencai + AkShare 双源
 - 标注数据时间戳
 - 发现异常数据主动提示用户
 

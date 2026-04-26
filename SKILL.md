@@ -7,7 +7,28 @@ description: |
   不适用：美股、港股、期货、期权、量化策略
 
 depends_on:
-  - akshare-stock           # A股数据
+  # AkShare数据（行情）
+  - akshare-stock
+
+  # Iwencai数据（选股/财务/研报/新闻）
+  - market-data-query          # 行情数据
+  - financial-data-query      # 财务数据
+  - a-share-screener         # A股选股
+  - sector-screener          # 板块选股
+  - research-report-search    # 研报搜索
+  - announcement-search       # 公告搜索
+  - news-search               # 新闻搜索
+  - macro-data-query         # 宏观数据
+  - industry-data-query       # 行业数据
+  - event-data-query         # 事件数据
+  - basic-info-query         # 基本资料
+  - index-data-query         # 指数数据
+  - convertible-bond-screener # 可转债选股
+  - etf-screener             # ETF选股
+  - fund-screener            # 基金选股
+  - futures-options-data-query # 期货期权数据
+
+  # 现有依赖
   - mx-finance-data         # 财务数据
   - mx-macro-data          # 宏观数据
   - mx-stocks-screener     # 选股筛选
@@ -22,6 +43,8 @@ depends_on:
 env:
   - MX_APIKEY
   - EM_API_KEY
+  - IWENCAI_BASE_URL=https://openapi.iwencai.com
+  - IWENCAI_API_KEY=【你的API_KEY】
 ---
 
 # A股散户盈利助手
