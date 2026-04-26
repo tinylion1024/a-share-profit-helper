@@ -23,6 +23,7 @@
 | 文件 | 内容 | 路径 |
 |------|------|------|
 | **[guides/rules.md](guides/rules.md)** | 七条硬规则 | references/guides/ |
+| **[guides/date-guide.md](guides/date-guide.md)** | 日期判断规范 | references/guides/ |
 | **[guides/data-sources.md](guides/data-sources.md)** | 数据源选择与可信度控制 | references/guides/ |
 | **[guides/anchors.md](guides/anchors.md)** | 买卖锚点、仓位模型、止损原则 | references/guides/ |
 | **[guides/templates.md](guides/templates.md)** | 操作/学习/进化报告模板 | references/guides/ |
