@@ -7,7 +7,7 @@ from typing import Optional
 
 from src.config import Config
 from src.core.analyzer import IntegratedAnalyzer
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,8 @@ class PreMarketReport:
     today_script_optimistic: str
     today_script_pessimistic: str
     confidence: str
+    market_stage: str
+    position_plan: str
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -31,12 +33,13 @@ class PreMarketAnalyzer:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.integrated_analyzer = IntegratedAnalyzer(self.config, self.provider)
 
     def generate_report(self, date: str) -> PreMarketReport:
         market = self.provider.get_market_snapshot(date)
         market_mode = self.integrated_analyzer.detect_market_mode(market.total_volume_billion)
+        market_cycle = self.integrated_analyzer.assess_market_cycle(date)
         optimistic, pessimistic = self.generate_dual_script({"market_mode": market_mode.mode, "hot_sectors": market.hot_sectors})
         return PreMarketReport(
             date=market.date,
@@ -45,7 +48,9 @@ class PreMarketAnalyzer:
             yesterday_leverage="、".join(market.leaders),
             today_script_optimistic=optimistic,
             today_script_pessimistic=pessimistic,
-            confidence="中高" if market.sentiment_score >= 3.3 else "中",
+            confidence="高" if market_cycle["stage"] == "亢奋期/加速期" else "中" if market_cycle["stage"] == "犹豫期/试探期" else "低",
+            market_stage=market_cycle["stage"],
+            position_plan=f"{market_cycle['action_bias']}，总仓位上限 {round(market_cycle['position_upper_bound'] * 100)}%",
         )
 
     def fetch_overnight_data(self) -> dict:

@@ -1,6 +1,6 @@
 {
   "_version": "2.1",
-  "_comment": "Skill runtime configuration. All keys are optional in offline-first mode.",
+  "_comment": "Skill runtime configuration. Default mode fetches live trusted market data.",
   "env": {
     "mx_apikey": "",
     "em_apikey": "",
@@ -8,7 +8,21 @@
     "iwencai_api_key": "",
     "data_cache_dir": "/tmp/a_shares_cache",
     "sample_data_path": "",
-    "offline_mode": true,
+    "offline_mode": false,
+    "live_source": "tencent",
+    "source_timeout_seconds": 10,
+    "live_watchlist": [
+      "300750",
+      "002594",
+      "600519",
+      "000001",
+      "600036",
+      "601318",
+      "000333",
+      "002475",
+      "601899",
+      "300308"
+    ],
     "log_level": "INFO"
   },
   "trading": {

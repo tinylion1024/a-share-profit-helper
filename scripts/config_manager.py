@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive config generator for the offline-first skill."""
+"""Interactive config generator for the live-first skill."""
 
 from __future__ import annotations
 
@@ -21,7 +21,21 @@ DEFAULT_CONFIG = {
         "iwencai_api_key": "",
         "data_cache_dir": "/tmp/a_shares_cache",
         "sample_data_path": "",
-        "offline_mode": True,
+        "offline_mode": False,
+        "live_source": "tencent",
+        "source_timeout_seconds": 10,
+        "live_watchlist": [
+            "300750",
+            "002594",
+            "600519",
+            "000001",
+            "600036",
+            "601318",
+            "000333",
+            "002475",
+            "601899",
+            "300308",
+        ],
         "log_level": "INFO",
     },
     "trading": {
@@ -47,8 +61,14 @@ def main() -> None:
     config = json.loads(json.dumps(DEFAULT_CONFIG))
     config_path = Path(__file__).resolve().parent.parent / "config.json"
 
-    print("离线优先配置向导")
-    config["env"]["offline_mode"] = prompt_bool("启用离线模式", True)
+    print("实时在线配置向导")
+    config["env"]["offline_mode"] = prompt_bool("启用离线模式(仅测试/应急)", False)
+    live_source = input("实时数据源(默认 tencent): ").strip()
+    if live_source:
+        config["env"]["live_source"] = live_source
+    watchlist = input("在线选股观察池(逗号分隔，可空): ").strip()
+    if watchlist:
+        config["env"]["live_watchlist"] = [item.strip() for item in watchlist.split(",") if item.strip()]
     config["env"]["sample_data_path"] = input("本地样本数据路径(可空): ").strip()
     config["env"]["iwencai_api_key"] = input("IWENCAI_API_KEY(可空): ").strip()
     config["env"]["mx_apikey"] = input("MX_APIKEY(可空): ").strip()

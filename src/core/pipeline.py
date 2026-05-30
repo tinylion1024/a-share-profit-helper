@@ -8,7 +8,7 @@ from src.config import Config
 from src.core.analyzer import IntegratedAnalyzer
 from src.core.rating import RatingSystem
 from src.core.risk_checker import RiskChecker
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
 
 
 class AnalysisPipeline:
@@ -16,7 +16,7 @@ class AnalysisPipeline:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.analyzer = IntegratedAnalyzer(self.config, self.provider)
         self.rating_system = RatingSystem(self.config, self.provider)
         self.risk_checker = RiskChecker(self.config, self.provider)
@@ -69,6 +69,8 @@ class AnalysisPipeline:
             "news": analysis["news"],
             "sentiment": analysis["sentiment"],
             "technical": analysis["technical"],
+            "methodology": analysis["methodology"],
+            "discipline": analysis["discipline"],
         }
 
     def _rate_stock_4d(self, context: dict) -> dict:
@@ -79,6 +81,8 @@ class AnalysisPipeline:
         stock = self.provider.get_stock_snapshot(context["stock_code"])
         rating = context["rating_4d"]
         risk = context["risk"]
+        methodology = context["market_3d"]["methodology"]
+        discipline = context["market_3d"]["discipline"]
         entry_price = round(min(stock.price, stock.resistance * 0.99), 2)
         stop_loss = round(min(stock.support, entry_price * (1 - self.config.stop_loss_ratio)), 2)
         target_price = round(
@@ -86,21 +90,32 @@ class AnalysisPipeline:
             2,
         )
 
-        position_ratio = min(self.config.max_single_position, 0.1 + rating["total_score"] / 10)
+        position_ratio = min(
+            self.config.max_single_position,
+            methodology["preferred_position"],
+            discipline["preferred_position"],
+        )
         if risk["risk_level"] == "R3":
             action = "不买"
             confidence = "低"
             position_ratio = 0.0
-        elif rating["is_recommended"]:
+        elif methodology["market_stage"] == "退潮期/补跌期":
+            action = "观望"
+            confidence = "低"
+            position_ratio = min(position_ratio, 0.1)
+        elif rating["is_recommended"] and methodology["methodology_score"] >= 4:
             action = "可以买"
             confidence = "中高" if rating["total_score"] >= 4 else "中"
+        elif rating["is_recommended"]:
+            action = "小仓试错"
+            confidence = "中"
         else:
             action = "观望"
             confidence = "中"
 
         summary = (
-            f"{stock.name} 当前属于{context['market_3d']['sentiment']['tone']}环境，"
-            f"四维评级为 {rating['level']}，风险等级 {risk['risk_level']}。"
+            f"{stock.name} 处于{methodology['market_stage']}，更适合{methodology['setup']}，"
+            f"定位为{methodology['style']}。四维评级 {rating['level']}，风险等级 {risk['risk_level']}。"
         )
         return {
             "action": action,
@@ -109,5 +124,9 @@ class AnalysisPipeline:
             "stop_loss": stop_loss,
             "target_price": target_price,
             "position_ratio": round(position_ratio, 2),
+            "market_stage": methodology["market_stage"],
+            "style": methodology["style"],
+            "setup": methodology["setup"],
+            "discipline": discipline,
             "summary": summary,
         }

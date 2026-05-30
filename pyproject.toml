@@ -5,15 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "a-shares-master-skill"
 version = "2.1.0"
-description = "Analyze A-share trades with resilient offline workflows."
+description = "Analyze A-share trades with latest trusted online data."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [{name = "tinylion1024"}]
 dependencies = []
 
+[project.scripts]
+a-shares-skill = "src.main:main"
+
 [project.optional-dependencies]
+mootdx = ["mootdx>=0.11"]
 test = ["pytest>=7,<9"]
+dev = ["mootdx>=0.11", "pytest>=7,<9"]
 
 [tool.setuptools]
 packages = ["src", "src.config", "src.core", "src.modules", "src.plugins", "src.providers", "src.utils"]

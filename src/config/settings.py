@@ -17,6 +17,16 @@ def _to_bool(value: Any, default: bool) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _normalize_watchlist(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        items = value.split(",")
+    else:
+        items = value
+    return tuple(item.strip() for item in items if str(item).strip())
+
+
 @dataclass(frozen=True)
 class Config:
     """Skill configuration with offline-first defaults."""
@@ -34,7 +44,10 @@ class Config:
     min_daily_turnover_million: float = 50.0
     data_cache_dir: str = "/tmp/a_shares_cache"
     sample_data_path: Optional[str] = None
-    offline_mode: bool = True
+    offline_mode: bool = False
+    live_source: str = "tencent"
+    source_timeout_seconds: float = 10.0
+    live_watchlist: tuple[str, ...] = ("auto",)
     log_level: str = "INFO"
 
     @classmethod
@@ -52,7 +65,15 @@ class Config:
             min_daily_turnover_million=float(os.getenv("MIN_DAILY_TURNOVER_MILLION", "50")),
             data_cache_dir=os.getenv("DATA_CACHE_DIR", "/tmp/a_shares_cache"),
             sample_data_path=os.getenv("A_SHARE_SKILL_DATA_PATH"),
-            offline_mode=_to_bool(os.getenv("A_SHARE_SKILL_OFFLINE_MODE"), True),
+            offline_mode=_to_bool(os.getenv("A_SHARE_SKILL_OFFLINE_MODE"), False),
+            live_source=os.getenv("A_SHARE_SKILL_LIVE_SOURCE", "tencent"),
+            source_timeout_seconds=float(os.getenv("A_SHARE_SKILL_TIMEOUT_SECONDS", "10")),
+            live_watchlist=_normalize_watchlist(
+                os.getenv(
+                    "A_SHARE_SKILL_WATCHLIST",
+                    "auto",
+                )
+            ),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
@@ -72,7 +93,15 @@ class Config:
             min_daily_turnover_million=float(payload.get("filters", {}).get("min_daily_volume", 50000000)) / 1_000_000,
             data_cache_dir=payload.get("env", {}).get("data_cache_dir", "/tmp/a_shares_cache"),
             sample_data_path=payload.get("env", {}).get("sample_data_path"),
-            offline_mode=_to_bool(payload.get("env", {}).get("offline_mode"), True),
+            offline_mode=_to_bool(payload.get("env", {}).get("offline_mode"), False),
+            live_source=payload.get("env", {}).get("live_source", "tencent"),
+            source_timeout_seconds=float(payload.get("env", {}).get("source_timeout_seconds", 10.0)),
+            live_watchlist=_normalize_watchlist(
+                payload.get("env", {}).get(
+                    "live_watchlist",
+                    ["auto"],
+                )
+            ),
             log_level=payload.get("env", {}).get("log_level", "INFO"),
         )
 
@@ -80,10 +109,17 @@ class Config:
     def load(cls, config_path: str | Path | None = None) -> "Config":
         """Merge JSON file config with environment overrides."""
         file_config = cls()
+        candidate_paths = []
         if config_path:
-            path = Path(config_path)
+            candidate_paths.append(Path(config_path))
+        else:
+            cwd_path = Path.cwd() / "config.json"
+            repo_path = Path(__file__).resolve().parents[2] / "config.json"
+            candidate_paths.extend([cwd_path, repo_path])
+        for path in candidate_paths:
             if path.exists():
                 file_config = cls.from_file(path)
+                break
 
         env_config = cls.from_env()
         merged = asdict(file_config)
@@ -95,21 +131,16 @@ class Config:
         return cls(**merged)
 
     def validate(self) -> bool:
-        """The skill is valid if offline mode or at least one live credential exists."""
+        """The skill is valid if a live source or an explicit offline fixture is configured."""
         if self.offline_mode:
             return True
-        return any([self.mx_apikey, self.em_api_key, self.iwencai_api_key])
+        return self.live_source in {"tencent"}
 
     def missing_live_credentials(self) -> list[str]:
         """Return missing live credentials when offline mode is disabled."""
         if self.offline_mode:
             return []
-        required = {
-            "MX_APIKEY": self.mx_apikey,
-            "EM_API_KEY": self.em_api_key,
-            "IWENCAI_API_KEY": self.iwencai_api_key,
-        }
-        return [key for key, value in required.items() if not value]
+        return []
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize the config."""

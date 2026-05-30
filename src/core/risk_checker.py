@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date as date_cls
 from typing import Optional
 
 from src.config import Config
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
+from src.utils.time import shanghai_today_str
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,12 @@ class RiskChecker:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.earnings_death_window = (4, 20, 4, 30)
 
     def check(self, stock_code: str, date: Optional[str] = None) -> RiskCheckResult:
         stock = self.provider.get_stock_snapshot(stock_code)
+        market = self.provider.get_market_snapshot(date)
         red_flags: list[str] = []
         warnings: list[str] = []
 
@@ -49,11 +50,17 @@ class RiskChecker:
             warnings.append("减持计划")
         if stock.turnover_million < self.config.min_daily_turnover_million:
             warnings.append("流动性不足")
+        if stock.price_position == "追涨":
+            warnings.append("位置偏高")
 
-        effective_date = date or date_cls.today().isoformat()
+        effective_date = date or shanghai_today_str()
         earnings_window_risk = self.is_in_earnings_death_window(effective_date) and not stock.earnings_disclosed
         if earnings_window_risk:
             red_flags.append("业绩窗口未披露")
+
+        breadth_ratio = round(market.advancers / max(market.decliners, 1), 2)
+        if market.sentiment_score <= 2.6 or breadth_ratio <= 0.85:
+            warnings.append("市场退潮期")
 
         if red_flags:
             risk_level = "R3"
@@ -64,6 +71,19 @@ class RiskChecker:
 
         details = stock.to_dict()
         details["checked_date"] = effective_date
+        details["market_sentiment_score"] = market.sentiment_score
+        details["market_breadth_ratio"] = breadth_ratio
+        details["discipline"] = {
+            "max_account_loss_per_trade": 0.02,
+            "avoid_revenge_trade": True,
+            "suggested_position_cap": round(
+                min(
+                    self.config.max_single_position,
+                    0.1 if "市场退潮期" in warnings else self.config.max_single_position,
+                ),
+                2,
+            ),
+        }
         return RiskCheckResult(
             stock_code=stock_code,
             is_clear=not red_flags,

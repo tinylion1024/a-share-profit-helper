@@ -6,7 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from src.config import Config
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.core.methodology import MethodologyEngine
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class HighPRStock:
     target_price: float
     stop_loss: float
     risk_reward_ratio: float
+    methodology_score: float
+    style: str
+    setup: str
+    preferred_position: float
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -36,42 +41,65 @@ class HighPRStockPicker:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
+        self.methodology = MethodologyEngine(self.config)
 
     def screen(self, filters: Optional[dict] = None) -> list[HighPRStock]:
         filter_names = set(filters.get("names", [])) if filters else set()
+        market = self.provider.get_market_snapshot()
         stocks = sorted(self.provider.list_stock_candidates(), key=lambda item: item.turnover_million, reverse=True)
         ranked: list[HighPRStock] = []
+        fallback_ranked: list[HighPRStock] = []
 
         for index, stock in enumerate(stocks, start=1):
             if stock.delisting_risk or stock.under_investigation:
                 continue
-            if "basic" in filter_names and (not stock.above_ma20 or stock.pe > 40):
+            strategy_profile = self.methodology.evaluate_stock(stock, market)
+            candidate = HighPRStock(
+                code=stock.code,
+                name=stock.name,
+                price=stock.price,
+                ma20_position=round(stock.price / stock.ma20, 2),
+                boll_position=stock.boll_position,
+                pe=stock.pe,
+                growth_q1=stock.q1_growth,
+                turnover_rank=index,
+                catalyst=stock.catalyst,
+                entry_price=round(min(stock.price, stock.resistance * 0.99), 2),
+                target_price=round(stock.resistance, 2),
+                stop_loss=round(stock.support, 2),
+                risk_reward_ratio=stock.risk_reward_ratio,
+                methodology_score=strategy_profile.methodology_score,
+                style=strategy_profile.style,
+                setup=strategy_profile.setup,
+                preferred_position=strategy_profile.preferred_position,
+            )
+            fallback_ranked.append(candidate)
+
+            if "basic" in filter_names and (stock.turnover_million < self.config.min_daily_turnover_million or stock.pe > 80):
                 continue
-            if "tech" in filter_names and (stock.momentum_score < 3 or stock.boll_position > 0.9):
+            if "tech" in filter_names and (stock.momentum_score < 2.5 or stock.boll_position > 0.95):
                 continue
             if "catalyst" in filter_names and not stock.catalyst:
                 continue
+            if strategy_profile.style == "观察股" and "basic" in filter_names:
+                continue
+            if market.sentiment_score <= 2.6 and strategy_profile.preferred_position <= 0:
+                continue
 
-            ranked.append(
-                HighPRStock(
-                    code=stock.code,
-                    name=stock.name,
-                    price=stock.price,
-                    ma20_position=round(stock.price / stock.ma20, 2),
-                    boll_position=stock.boll_position,
-                    pe=stock.pe,
-                    growth_q1=stock.q1_growth,
-                    turnover_rank=index,
-                    catalyst=stock.catalyst,
-                    entry_price=round(min(stock.price, stock.resistance * 0.99), 2),
-                    target_price=round(stock.resistance, 2),
-                    stop_loss=round(stock.support, 2),
-                    risk_reward_ratio=stock.risk_reward_ratio,
-                )
+            ranked.append(candidate)
+
+        if ranked:
+            return sorted(
+                ranked,
+                key=lambda item: (item.methodology_score, item.risk_reward_ratio, -item.turnover_rank),
+                reverse=True,
             )
-
-        return sorted(ranked, key=lambda item: item.risk_reward_ratio, reverse=True)
+        return sorted(
+            fallback_ranked,
+            key=lambda item: (item.methodology_score, item.risk_reward_ratio, -item.turnover_rank),
+            reverse=True,
+        )[:3]
 
     def extract_technical_levels(self, stock_codes: list[str]) -> dict:
         result = {}

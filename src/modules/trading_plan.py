@@ -9,7 +9,7 @@ from src.config import Config
 from src.core.analyzer import IntegratedAnalyzer
 from src.core.rating import RatingSystem
 from src.core.risk_checker import RiskChecker
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,7 @@ class TradingPlan:
     pessimistic_position: float
     risk_control: dict
     break_points: dict
+    methodology: dict
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -41,7 +42,7 @@ class TradingPlanGenerator:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.analyzer = IntegratedAnalyzer(self.config, self.provider)
         self.rating_system = RatingSystem(self.config, self.provider)
         self.risk_checker = RiskChecker(self.config, self.provider)
@@ -50,6 +51,9 @@ class TradingPlanGenerator:
         stock = self.provider.get_stock_snapshot(stock_code)
         market = self.provider.get_market_snapshot(date)
         market_mode = self.analyzer.detect_market_mode(market.total_volume_billion)
+        market_cycle = self.analyzer.assess_market_cycle(date)
+        trade_setup = self.analyzer.evaluate_trade_setup(stock_code, date)
+        discipline = self.analyzer.build_trade_discipline(stock_code, date)
         rating = self.rating_system.rate_stock(stock_code, date)
         risk = self.risk_checker.check(stock_code, date)
         optimistic_triggers, pessimistic_triggers = self.define_triggers(market_mode.mode)
@@ -64,12 +68,15 @@ class TradingPlanGenerator:
             stock_code=stock.code,
             stock_name=stock.name,
             date=market.date,
-            optimistic_triggers=optimistic_triggers,
+            optimistic_triggers=optimistic_triggers + [f"市场阶段 {market_cycle['stage']}", f"参与方式 {trade_setup['setup']}"],
             optimistic_entry=optimistic_entry,
             optimistic_target=optimistic_target,
             optimistic_stop_loss=optimistic_stop,
-            optimistic_position=self.calculate_position(risk.risk_level, "高" if rating.total_score >= 4 else "中"),
-            pessimistic_triggers=pessimistic_triggers,
+            optimistic_position=min(
+                self.calculate_position(risk.risk_level, "高" if rating.total_score >= 4 else "中"),
+                trade_setup["preferred_position"],
+            ),
+            pessimistic_triggers=pessimistic_triggers + [market_cycle["focus"]],
             pessimistic_entry=round(stock.support, 2),
             pessimistic_target=round(stock.ma20, 2),
             pessimistic_stop_loss=pessimistic_stop,
@@ -78,8 +85,13 @@ class TradingPlanGenerator:
                 "risk_level": risk.risk_level,
                 "red_flags": risk.red_flags,
                 "warnings": risk.warnings,
+                "discipline": discipline,
             },
             break_points={"support": stock.support, "resistance": stock.resistance},
+            methodology={
+                "market_cycle": market_cycle,
+                "trade_setup": trade_setup,
+            },
         )
 
     def fetch_market_metrics(self, date: str) -> dict:

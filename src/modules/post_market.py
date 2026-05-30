@@ -7,7 +7,7 @@ from typing import Optional
 
 from src.config import Config
 from src.core.analyzer import IntegratedAnalyzer
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class PostMarketReview:
     key_stocks: list[str]
     sector_rotation: str
     tomorrow_focus: list[str]
+    market_stage: str
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -30,28 +31,31 @@ class PostMarketAnalyzer:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.integrated_analyzer = IntegratedAnalyzer(self.config, self.provider)
 
     def generate_review(self, date: str) -> PostMarketReview:
         market = self.provider.get_market_snapshot(date)
         liquidity = self.integrated_analyzer.analyze_liquidity_pattern(date)
+        market_cycle = self.integrated_analyzer.assess_market_cycle(date)
         return PostMarketReview(
             date=market.date,
             index_summary={
                 "成交额(亿)": market.total_volume_billion,
                 "涨跌比": f"{market.advancers}:{market.decliners}",
+                "平盘数": market.unchanged,
                 "流动性模式": liquidity["market_mode"]["mode"],
             },
             sentiment_monitor=f"情绪分 {market.sentiment_score}，海外信号 {market.overseas_signal}",
             key_stocks=list(market.leaders),
             sector_rotation=self.analyze_sector_rotation()["summary"],
             tomorrow_focus=[f"留意 {sector}" for sector in market.hot_sectors[:3]],
+            market_stage=market_cycle["stage"],
         )
 
     def fetch_hard_metrics(self) -> dict:
         market = self.provider.get_market_snapshot()
-        return {"成交额(亿)": market.total_volume_billion, "涨家": market.advancers, "跌家": market.decliners}
+        return {"成交额(亿)": market.total_volume_billion, "涨家": market.advancers, "跌家": market.decliners, "平家": market.unchanged}
 
     def fetch_soft_sentiment(self) -> dict:
         market = self.provider.get_market_snapshot()

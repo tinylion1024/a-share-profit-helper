@@ -17,11 +17,14 @@ class MarketSnapshot:
     trend_score: float
     advancers: int
     decliners: int
+    unchanged: int = 0
     hot_sectors: tuple[str, ...] = field(default_factory=tuple)
     cold_sectors: tuple[str, ...] = field(default_factory=tuple)
     policy_highlights: tuple[str, ...] = field(default_factory=tuple)
     leaders: tuple[str, ...] = field(default_factory=tuple)
     overseas_signal: str = "中性"
+    data_source: str = ""
+    refreshed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -50,6 +53,8 @@ class StockSnapshot:
     earnings_shock: bool = False
     earnings_disclosed: bool = True
     notes: tuple[str, ...] = field(default_factory=tuple)
+    data_source: str = ""
+    refreshed_at: str = ""
 
     @property
     def above_ma20(self) -> bool:

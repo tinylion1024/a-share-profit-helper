@@ -6,7 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from src.config import Config
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.core.methodology import MethodologyEngine
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,8 @@ class IntegratedAnalyzer:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
+        self.methodology = MethodologyEngine(self.config)
 
     def detect_market_mode(self, total_volume: float) -> MarketMode:
         if total_volume >= 20000:
@@ -51,16 +53,14 @@ class IntegratedAnalyzer:
 
     def analyze_sentiment(self, date: str | None = None) -> dict:
         snapshot = self.provider.get_market_snapshot(date)
+        market_cycle = self.methodology.assess_market_cycle(snapshot)
         score = round(snapshot.sentiment_score, 2)
-        if score >= 4:
-            tone = "情绪升温"
-        elif score >= 3:
-            tone = "情绪中性偏暖"
-        else:
-            tone = "情绪谨慎"
         return {
             "score": score,
-            "tone": tone,
+            "tone": market_cycle.stage,
+            "environment": market_cycle.environment,
+            "action_bias": market_cycle.action_bias,
+            "position_upper_bound": market_cycle.position_upper_bound,
             "leaders": list(snapshot.leaders),
             "overseas_signal": snapshot.overseas_signal,
         }
@@ -68,15 +68,40 @@ class IntegratedAnalyzer:
     def analyze_liquidity_pattern(self, date: str | None = None) -> dict:
         snapshot = self.provider.get_market_snapshot(date)
         mode = self.detect_market_mode(snapshot.total_volume_billion)
+        market_cycle = self.methodology.assess_market_cycle(snapshot)
         breadth = round(snapshot.advancers / max(snapshot.decliners, 1), 2)
         return {
             "market_mode": mode.to_dict(),
             "breadth": breadth,
             "advancers": snapshot.advancers,
             "decliners": snapshot.decliners,
+            "market_cycle": market_cycle.to_dict(),
             "hot_sectors": list(snapshot.hot_sectors),
             "cold_sectors": list(snapshot.cold_sectors),
         }
+
+    def assess_market_cycle(self, date: str | None = None) -> dict:
+        snapshot = self.provider.get_market_snapshot(date)
+        return self.methodology.assess_market_cycle(snapshot).to_dict()
+
+    def evaluate_trade_setup(self, stock_code: str, date: str | None = None) -> dict:
+        stock = self.provider.get_stock_snapshot(stock_code)
+        snapshot = self.provider.get_market_snapshot(date)
+        return self.methodology.evaluate_stock(stock, snapshot).to_dict()
+
+    def build_trade_discipline(self, stock_code: str, date: str | None = None) -> dict:
+        stock = self.provider.get_stock_snapshot(stock_code)
+        snapshot = self.provider.get_market_snapshot(date)
+        return self.methodology.build_discipline(stock, snapshot)
+
+    def build_market_playbook(self, date: str | None = None) -> dict:
+        snapshot = self.provider.get_market_snapshot(date)
+        return self.methodology.build_market_playbook(snapshot)
+
+    def build_stock_playbook(self, stock_code: str, date: str | None = None) -> dict:
+        stock = self.provider.get_stock_snapshot(stock_code)
+        snapshot = self.provider.get_market_snapshot(date)
+        return self.methodology.build_stock_playbook(stock, snapshot)
 
     def check_mandatory_risks(self, stock_code: str) -> dict:
         stock = self.provider.get_stock_snapshot(stock_code)
@@ -117,12 +142,16 @@ class IntegratedAnalyzer:
         news = self.analyze_news_policy(date=date)
         sentiment = self.analyze_sentiment(date=date)
         liquidity = self.analyze_liquidity_pattern(date=date)
+        strategy_profile = self.methodology.evaluate_stock(stock, market)
+        discipline = self.methodology.build_discipline(stock, market)
         return {
             "stock": stock.to_dict(),
             "market": market.to_dict(),
             "news": news,
             "sentiment": sentiment,
             "liquidity": liquidity,
+            "methodology": strategy_profile.to_dict(),
+            "discipline": discipline,
             "technical": {
                 "above_ma20": stock.above_ma20,
                 "price_position": stock.price_position,

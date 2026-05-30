@@ -8,7 +8,7 @@ from typing import Optional
 from src.config import Config
 from src.core.analyzer import IntegratedAnalyzer
 from src.core.risk_checker import RiskChecker
-from src.providers import MarketDataProvider, OfflineFirstProvider
+from src.providers import MarketDataProvider, build_provider
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class RatingSystem:
 
     def __init__(self, config: Optional[Config] = None, provider: Optional[MarketDataProvider] = None):
         self.config = config or Config.load()
-        self.provider = provider or OfflineFirstProvider(self.config)
+        self.provider = provider or build_provider(self.config)
         self.analyzer = IntegratedAnalyzer(self.config, self.provider)
         self.risk_checker = RiskChecker(self.config, self.provider)
 
@@ -76,6 +76,8 @@ class RatingSystem:
         stock = self.provider.get_stock_snapshot(stock_code)
         market = self.provider.get_market_snapshot(date)
         risk = self.risk_checker.check(stock_code, date)
+        strategy_profile = self.analyzer.methodology.evaluate_stock(stock, market)
+        market_cycle = self.analyzer.methodology.assess_market_cycle(market)
 
         opportunity = 3
         if stock.momentum_score >= 4:
@@ -85,6 +87,10 @@ class RatingSystem:
         if stock.catalyst == "":
             opportunity -= 1
         if stock.q1_growth < 0:
+            opportunity -= 1
+        if strategy_profile.style in {"主线龙头", "趋势中军"}:
+            opportunity += 1
+        elif strategy_profile.style == "观察股":
             opportunity -= 1
 
         if risk.risk_level == "R3":
@@ -101,10 +107,18 @@ class RatingSystem:
             certainty += 1
         if risk.warnings:
             certainty -= 1
+        if market_cycle.stage == "退潮期/补跌期":
+            certainty -= 1
+        if strategy_profile.methodology_score >= 4:
+            certainty += 1
 
         comfort = self.calculate_comfort(stock.price_position, stock.volume_pattern)
         if stock.risk_reward_ratio >= 2.5 and comfort < 5:
             comfort += 1
+        if strategy_profile.setup == "分歧低吸" and comfort < 5:
+            comfort += 1
+        if strategy_profile.setup == "只宜确认后参与":
+            comfort -= 1
 
         return FourDimensionRating(
             opportunity=max(1, min(5, opportunity)),
