@@ -1,129 +1,407 @@
 # A股散户盈利助手
 
-一个面向 Agent 的 A 股分析 Skill，目标是默认使用最新在线可信数据，输出稳定的 `诊股 / 选股 / 风控 / 盘前盘后复盘 / 市场周期判断 / 方法论执行手册 / 交易计划 / 新闻 / 公告 / 资金流 / 行业轮动 / 热点强势股 / 概念板块 / 研报 / 龙虎榜 / 融资融券 / 大宗交易 / 股东户数 / 分红 / 解禁 / 北向资金 / 个股信息 / 批量实时行情 / K线 / 五档盘口 / 逐笔成交 / 季报快照 / F10 公司资料 / 财报三表 / 一致预期 / 估值 / 批量对比 / 主题研报批量检索 / 快速调研 / iwencai 语义检索` 结果。
+一个面向 Agent 的 A 股研究与交易分析 Skill。
 
-## 当前改造方向
+它的目标不是做“单一数据接口封装”，而是把行情、资金、公告、研报、社区情绪、方法论规则、用户偏好与记忆，收敛成一套统一入口，直接输出可执行的市场判断和单票结论。
 
-- 统一入口：所有能力收敛到 `scripts/run_skill.py`
-- 全栈在线数据：腾讯行情 + 东财新闻/研报/资金流/行业/龙虎榜/两融/大宗/股东户数/分红/解禁 + 财联社快讯 + 同花顺北向/一致预期/热点强势股/概念题材 + mootdx K线 / 五档盘口 / 逐笔成交 / 季报快照 / F10 文本资料 + 新浪财报三表 + 可选 iwencai 语义检索
-- 工作流产品化：`valuation`、`quick-research`、`theme-research` 统一输出 `workflow / generated_at / input / degraded / errors / coverage / summary`
-- 方法论落地：新增 `market-cycle` 和 `playbook`，把市场阶段、仓位节奏、入场/加仓/减仓/离场规则和纪律约束显式化
-- 健康检查增强：`self-check` 现在会输出依赖状态、凭证状态、关键能力检查和推荐动作
-- 兼容 Agent：`SKILL.md` 采用 OpenClaw / Hermes 都能消费的元数据形式
-- 可测试：仓库内置自检和测试脚本
+当前项目已经更接近一套：
 
-## 核心工作流
+- 题材周期 + 情绪博弈 + 龙头/中军交易的规则化研究系统
+- 面向 OpenClaw / Hermes / Claude Code 的 A 股分析 Skill
+- 在线优先、离线可测、可持续积累用户记忆的研究工具
 
-- `valuation`
-  单票完整估值，聚合实时行情和一致预期，输出前向 PE、PEG、PE 消化年数。
+## 项目定位
+
+这个项目主要解决 4 类问题：
+
+1. 今天市场是进攻、试仓还是防守？
+2. 这只股票能买吗，风险大不大，应该怎么执行？
+3. 这个题材最近有没有持续强化，市场和社区在看什么？
+4. 我最近反复研究过哪些股票和题材，系统能不能记住并不断演化？
+
+它不是纯价值投资模型，也不是纯量化埋伏系统。
+
+当前主风格是：
+
+- 题材周期
+- 情绪博弈
+- 龙头 / 中军识别
+- 纪律化执行
+- 基本面与研报作为辅助验证
+
+## 当前核心特性
+
+### 1. 统一 Skill 入口
+
+所有能力统一收敛到：
+
+- 安装后命令：`a-shares-skill`
+- 仓库内入口：`python3 scripts/run_skill.py`
+- 模块入口：`python3 -m src.main`
+
+核心封装在 [src/skill.py](/Users/zhangshaowei/Documents/Codex/2026-05-28/tinylion1024-a-share-profit-helper-https/repo/src/skill.py)。
+
+### 2. 在线优先的多源数据层
+
+当前已经接入的主要数据面包括：
+
+- 腾讯财经：实时报价、批量 quotes
+- 东方财富：新闻、公告、研报、资金流、行业板块、龙虎榜、两融、大宗、股东户数、分红、解禁
+- 同花顺：热点强势股、概念题材、北向资金、一致预期
+- 淘股吧：热点帖子、市场舆情、个股情绪、大 V 观点
+- 财联社：快讯
+- `mootdx`：K 线、五档盘口、逐笔成交、季报快照、F10
+- 新浪：财报三表
+- `iwencai`：语义检索与主题研究
+
+### 3. 方法论驱动的工作流
+
+当前项目不只是“拿数据”，而是把数据压成工作流：
+
+- `market-cycle`：判断市场阶段、环境强弱、仓位上限、主攻/防守节奏
+- `diagnose`：单票诊断，输出能不能买、风格定位、风险和结论
+- `playbook`：入场、加仓、减仓、离场的执行手册
+- `pick`：候选股筛选
+- `plan`：交易计划
+- `quick-research`：新标的快速调研
+- `theme-research`：主题研报与题材批量检索
+- `valuation` / `compare`：估值和批量对比
+
+### 4. 社区情绪层
+
+项目已经显式支持淘股吧信号，并融入交易体系：
+
+- `taoguba-hot`
+- `taoguba-sentiment`
+- `taoguba-stock`
+- `taoguba-vip`
+
+这些能力已经进入：
+
+- `market-cycle`
+- `diagnose`
 - `quick-research`
-  新标的快速调研，聚合估值、概念、资金流、龙虎榜、解禁、两融、股东户数和近端研报。
-- `theme-research`
-  主题研报批量检索，支持多 query `iwencai` 语义检索和东财研报补充。
 
-## OpenClaw 自然语言使用
+### 5. 时间感知
 
-这个 Skill 的目标用法不是让最终用户手写命令，而是让 OpenClaw 在后台根据自然语言自动选择工作流并执行命令。
+Skill 已有统一时间上下文层，会根据盘前、盘中、盘后、周末、历史回看，自动选择合适的数据窗口和证据范围，而不是简单把“今天”硬塞给所有流程。
 
-- 用户说 `宁德时代能买吗`
-  OpenClaw 应路由到 `diagnose`，必要时补 `playbook`
-- 用户说 `今天市场情绪怎么样，适合进攻还是防守`
-  OpenClaw 应路由到 `market-cycle`
-- 用户说 `帮我快速研究一下比亚迪`
-  OpenClaw 应路由到 `quick-research`
-- 用户说 `机器人主题最近有什么研报`
-  OpenClaw 应路由到 `theme-research`
+### 6. 用户偏好与进化记忆
 
-当前 CLI 也已支持 `股票代码或简称`，因此即使 OpenClaw 把 `宁德时代` 直接作为参数传入，skill 也会在内部解析成对应股票代码。
+当前项目已经支持用户画像和持续演化记忆：
+
+- 偏好：风险偏好、默认周期、偏好板块、回避板块、自选股、偏好风格
+- 记忆：最近看过的股票、最近跑过的工作流、单票笔记
+- 股票画像：风格、setup、社区情绪、题材标签、催化、方法论评分均值
+- 题材画像：关联股票、近期理由、热度来源、阶段分布
+
+对应命令：
+
+- `profile-show`
+- `profile-set`
+- `memory-show`
+- `memory-note`
+- `memory-clear`
+
+## 最推荐的使用方式
+
+如果你只想记住一条主线，建议按这个顺序使用：
+
+1. 先看市场环境
+2. 再找主线和候选
+3. 再看单票值不值得做
+4. 最后看执行和研究补充
+
+对应命令：
+
+```bash
+a-shares-skill market-cycle
+a-shares-skill pick --filters basic,tech,catalyst
+a-shares-skill diagnose --code 宁德时代
+a-shares-skill playbook --code 宁德时代
+a-shares-skill quick-research --code 宁德时代
+```
 
 ## 快速开始
 
+### 安装
+
+基础版：
+
 ```bash
 pip install .
-a-shares-skill self-check
-a-shares-skill valuation --code 300750
-a-shares-skill quick-research --code 300750 --date 2026-05-29
-a-shares-skill theme-research --queries "人形机器人产业链深度 2026,人形机器人减速器 丝杠" --channel report --size 5 --supplement-per-stock 2
-
-# 仓库内开发模式
-python3 scripts/run_skill.py self-check
-python3 scripts/run_skill.py risk --code 300750
-python3 scripts/run_skill.py diagnose --code 300750 --date 2026-05-28
-python3 scripts/run_skill.py pick --filters basic,tech,catalyst
-python3 scripts/run_skill.py market-cycle --date 2026-05-28
-python3 scripts/run_skill.py plan --code 300750 --date 2026-05-28
-python3 scripts/run_skill.py playbook --code 300750 --date 2026-05-28
-python3 scripts/run_skill.py news --code 300750 --page-size 3
-python3 scripts/run_skill.py announcements --code 300750 --page-size 3
-python3 scripts/run_skill.py fund-flow --code 300750 --period minute
-python3 scripts/run_skill.py sectors --top 5
-python3 scripts/run_skill.py hot-stocks --page-size 5
-python3 scripts/run_skill.py concept-blocks --code 300750
-python3 scripts/run_skill.py reports --code 300750 --page-size 3
-python3 scripts/run_skill.py dragon-tiger --code 002428 --date 2026-05-28
-python3 scripts/run_skill.py daily-dragon-tiger --date 2026-05-28 --min-net-buy 5000
-python3 scripts/run_skill.py margin --code 300750 --page-size 3
-python3 scripts/run_skill.py block-trades --code 300750 --page-size 3
-python3 scripts/run_skill.py holders --code 300750 --page-size 3
-python3 scripts/run_skill.py dividends --code 300750 --page-size 3
-python3 scripts/run_skill.py lockup --code 002428 --date 2026-05-28 --forward-days 90
-python3 scripts/run_skill.py northbound --history-days 5
-python3 scripts/run_skill.py stock-info --code 300750
-python3 scripts/run_skill.py quotes --codes 300750,sh000300,510300 --kind auto
-python3 scripts/run_skill.py valuation --code 300750
-python3 scripts/run_skill.py compare --codes 300750,002594
-python3 scripts/run_skill.py theme-research --queries "人形机器人产业链深度 2026,人形机器人减速器 丝杠" --channel report --size 5 --supplement-per-stock 2
-python3 scripts/run_skill.py quick-research --code 300750 --date 2026-05-29
-python3 scripts/run_skill.py kline --code 300750 --frequency 4 --limit 5
-python3 scripts/run_skill.py order-book --code 300750
-python3 scripts/run_skill.py transactions --code 300750 --start 0 --limit 5
-python3 scripts/run_skill.py quarterly-snapshot --code 300750
-python3 scripts/run_skill.py f10 --code 300750 --category 最新提示
-python3 scripts/run_skill.py finance --code 300750 --report-type lrb --page-size 1
-python3 scripts/run_skill.py consensus-eps --code 300750
-python3 scripts/run_skill.py iwencai-search --query "人形机器人 行星滚柱丝杠 2026" --channel report --size 3
-sh scripts/run_tests.sh
 ```
 
-## 安装层级
+带 `mootdx` 的增强版：
 
-- 基础版：`pip install .`
-  适合使用默认在线数据层和统一 CLI。
-- `mootdx` 增强版：`pip install .[mootdx]`
-  增加 `quarterly-snapshot`、`f10`、`kline`、`order-book`、`transactions` 等能力的真数据支持。
-- 开发版：`pip install .[dev]`
-  包含 `mootdx` 和测试依赖，适合本地开发和回归。
-- `iwencai` 增强层：无需额外 pip 包，但需要设置 `IWENCAI_API_KEY`
-  启用 `iwencai-search`、`iwencai-query`、`theme-research` 的在线语义检索。
+```bash
+pip install .[mootdx]
+```
 
-## 配置
+开发和测试：
 
-- 默认在线模式：见 `.env.example`
-- 安装后默认命令名：`a-shares-skill`
-- 开发模式也支持：`python3 -m src.main ...`
-- 若要启用 `quarterly-snapshot` / `f10` 真数据，请安装可选依赖：`pip install .[mootdx]`
-- 若要本地开发并跑测试，推荐：`pip install .[dev]`
-- `iwencai` 检索需要显式配置 `IWENCAI_API_KEY`
-- `theme-research` 依赖 `iwencai` 检索能力，因此在线模式下同样需要 `IWENCAI_API_KEY`
-- 自定义本地样本数据：设置 `A_SHARE_SKILL_DATA_PATH=/path/to/data.json`
-- 离线模式只建议用于测试或上游行情不可达时排障
+```bash
+pip install .[dev]
+```
 
-## 目录
+### 自检
+
+```bash
+a-shares-skill self-check
+```
+
+仓库内开发模式：
+
+```bash
+python3 scripts/run_skill.py self-check
+```
+
+### 常见环境变量
+
+- `A_SHARE_SKILL_OFFLINE_MODE=true`
+  仅用于测试或排障，强制使用离线 fixture
+- `A_SHARE_SKILL_DATA_PATH=/path/to/data.json`
+  指定离线样本数据
+- `IWENCAI_API_KEY=...`
+  启用在线 `iwencai` 检索与 `theme-research`
+
+## Show Case
+
+### Case 1：盘前先看今天适合进攻还是防守
+
+```bash
+a-shares-skill market-cycle
+a-shares-skill pre-market
+```
+
+适合回答：
+
+- 当前是加速、试探还是退潮
+- 总仓位上限大概多少
+- 更适合主攻、试仓还是防守
+- 热点在哪，情绪锚点是谁
+
+### Case 2：我有一只票，想知道能不能买
+
+```bash
+a-shares-skill diagnose --code 宁德时代
+a-shares-skill playbook --code 宁德时代
+```
+
+适合回答：
+
+- 这只票是主线龙头、趋势中军还是观察股
+- 适合分歧低吸还是趋势跟随
+- 买点、加仓点、减仓点、离场条件是什么
+
+### Case 3：我想快速研究一个标的
+
+```bash
+a-shares-skill quick-research --code 寒武纪
+```
+
+输出会聚合：
+
+- 估值
+- 概念题材
+- 资金流
+- 龙虎榜 / 两融 / 股东户数 / 解禁
+- 研报与公告
+- 淘股吧情绪和大 V 观点
+- 方法论层的市场阶段与风格判断
+
+### Case 4：我想看题材，不是看单票
+
+```bash
+a-shares-skill theme-research --queries 机器人,储能 --channel report --size 5 --supplement-per-stock 2
+```
+
+适合回答：
+
+- 某个主题最近有哪些研报
+- 有哪些标的被反复提及
+- 哪些题材正在强化
+
+### Case 5：我想单独观察社区情绪
+
+```bash
+a-shares-skill taoguba-sentiment --page-size 10
+a-shares-skill taoguba-stock --code 宁德时代 --page-size 20
+a-shares-skill taoguba-vip --code 宁德时代 --page-size 10
+```
+
+适合回答：
+
+- 淘股吧最近最热在聊什么
+- 某只票股民整体偏多还是偏空
+- 有没有大 V 在持续关注
+
+### Case 6：我希望系统记住我反复关注的票和题材
+
+```bash
+a-shares-skill profile-set --risk-preference 稳健型 --default-horizon 波段 --preferred-sectors 储能,机器人 --watchlist 宁德时代,比亚迪
+a-shares-skill quick-research --code 宁德时代
+a-shares-skill theme-research --queries 机器人,储能 --channel report --size 3 --supplement-per-stock 1
+a-shares-skill memory-show --code 宁德时代
+a-shares-skill profile-show
+```
+
+这套流程会让系统逐步沉淀：
+
+- 你偏好的题材和风格
+- 最近反复研究的股票
+- 单票画像和题材画像
+- 题材和股票之间的关联关系
+
+## 常用命令分组
+
+### 核心交易工作流
+
+- `market-cycle`
+- `diagnose`
+- `risk`
+- `pick`
+- `plan`
+- `playbook`
+- `pre-market`
+- `post-market`
+
+### 研究工作流
+
+- `quick-research`
+- `theme-research`
+- `valuation`
+- `compare`
+
+### 社区情绪
+
+- `taoguba-hot`
+- `taoguba-sentiment`
+- `taoguba-stock`
+- `taoguba-vip`
+
+### 新闻与事件
+
+- `news`
+- `telegraph`
+- `global-news`
+- `announcements`
+- `reports`
+
+### 资金与筹码
+
+- `fund-flow`
+- `dragon-tiger`
+- `daily-dragon-tiger`
+- `margin`
+- `block-trades`
+- `holders`
+- `dividends`
+- `lockup`
+- `northbound`
+
+### 行情与基础资料
+
+- `quotes`
+- `stock-info`
+- `concept-blocks`
+- `sectors`
+- `hot-stocks`
+- `kline`
+- `order-book`
+- `transactions`
+- `quarterly-snapshot`
+- `f10`
+- `finance`
+- `consensus-eps`
+
+### 用户画像与记忆
+
+- `profile-show`
+- `profile-set`
+- `memory-show`
+- `memory-note`
+- `memory-clear`
+
+## OpenClaw / Hermes / Claude Code 使用说明
+
+这个项目的目标用法，不是让最终用户背命令，而是让 Agent 在后台自动路由。
+
+自然语言和命令的推荐映射：
+
+- “今天市场情绪怎么样，适合进攻还是防守？”
+  - `market-cycle`
+- “宁德时代能买吗？”
+  - `diagnose`
+- “给我宁德时代的买卖执行手册”
+  - `playbook`
+- “帮我快速研究一下比亚迪”
+  - `quick-research`
+- “机器人主题最近有什么研报和标的？”
+  - `theme-research`
+- “淘股吧今天最热在聊什么？”
+  - `taoguba-sentiment`
+- “宁德时代在淘股吧上的情绪怎么样？”
+  - `taoguba-stock`
+
+当前 CLI 已支持“股票代码或简称”两种输入方式。
+
+例如下面这些都可以：
+
+```bash
+a-shares-skill diagnose --code 300750
+a-shares-skill diagnose --code 宁德时代
+a-shares-skill quick-research --code 比亚迪
+```
+
+## 目录结构
 
 ```text
 src/
-  config/      统一配置
-  core/        分析 / 评级 / 风控 / 工作流
-  modules/     盘前、盘后、选股、交易计划
-  providers/   在线优先数据层（腾讯 / 东财 / 同花顺 / mootdx / 巨潮 / 财联社）
-  skill.py     单一 Skill 入口
+  config/        配置
+  core/          方法论、分析、风控、时间上下文
+  modules/       盘前、盘后、选股、交易计划
+  providers/     在线数据层与离线 fixture
+  utils/         通用工具
+  skill.py       统一 Skill facade
+  main.py        安装型 CLI 入口
+  cli.py         文本渲染
+  user_context.py 用户偏好与进化记忆
 scripts/
-  run_skill.py 统一 CLI
-  run_tests.sh 测试入口
+  run_skill.py   仓库内兼容入口
+  run_tests.sh   测试入口
 tests/
-  skills/      技能兼容性和行为测试
+  skills/        兼容性与行为测试
 ```
 
-## 说明
+## 验证与测试
 
-当前版本已经把默认路径切到在线可信多源数据；离线 fixture 仅保留给测试和受限环境。
+运行自检：
+
+```bash
+a-shares-skill self-check
+python3 -m src.main self-check
+```
+
+运行测试：
+
+```bash
+sh scripts/run_tests.sh
+```
+
+如果安装了 `pytest`，也可以：
+
+```bash
+python3 -m pytest -q tests
+```
+
+## 当前边界
+
+- 默认契约是在线可信数据，离线模式只建议用于测试或排障
+- 社区情绪目前重点接在淘股吧，东方财富股吧还没有完整并入
+- 这是研究与分析 Skill，不是自动交易系统
+- 估值、情绪、方法论和社区信号会辅助决策，但不应被理解为收益承诺
+
+## 一句话总结
+
+如果你把它当成“一个会看市场环境、会看单票、会看题材、会看社区情绪、还能记住你长期关注方向并持续进化的 A 股 Agent Skill”，这个理解是准确的。

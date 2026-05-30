@@ -242,3 +242,39 @@ class MarketDataProvider(ABC):
     ) -> list[dict[str, Any]]:
         """Return iwencai structured-query rows."""
         raise NotImplementedError("iwencai query is not implemented by this provider")
+
+    def get_taoguba_hot_articles(
+        self,
+        page_size: int = 10,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return Taoguba hot articles from the 点赞榜."""
+        raise NotImplementedError("taoguba hot articles are not implemented by this provider")
+
+    def get_taoguba_market_sentiment(self, page_size: int = 20) -> dict[str, Any]:
+        """Return Taoguba-derived market sentiment and topic heat."""
+        raise NotImplementedError("taoguba market sentiment is not implemented by this provider")
+
+    def get_taoguba_stock_comments(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Return Taoguba stock discussion comments for a given stock."""
+        raise NotImplementedError("taoguba stock comments are not implemented by this provider")
+
+    def get_taoguba_stock_sentiment(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> dict[str, Any]:
+        """Return Taoguba-derived single-stock sentiment summary."""
+        raise NotImplementedError("taoguba stock sentiment is not implemented by this provider")
+
+    def get_taoguba_vip_views(
+        self,
+        stock_code: str | None = None,
+        page_size: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return Taoguba VIP views, optionally filtered for a stock."""
+        raise NotImplementedError("taoguba vip views are not implemented by this provider")

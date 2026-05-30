@@ -4,7 +4,9 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from urllib.error import URLError
 from unittest.mock import patch
@@ -13,12 +15,13 @@ import pandas as pd
 
 from src.cli import normalize_filters
 from src.config import Config
+from src.core.time_context import build_intent_time_context
 from src.main import _apply_runtime_defaults, build_parser
 from src.providers import build_provider
 from src.providers.base import OnlineDataError
 from src.providers.live import TencentLiveProvider
 from src.skill import ASharesSkill
-from src.utils.time import shanghai_today_str
+from src.utils.time import SHANGHAI_TZ, shanghai_today_str
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +45,10 @@ def extract_sections(text: str) -> list[str]:
 
 def make_offline_config() -> Config:
     return Config(offline_mode=True)
+
+
+def make_offline_cache_config(cache_dir: str) -> Config:
+    return Config(offline_mode=True, data_cache_dir=cache_dir)
 
 
 class DummyResponse:
@@ -73,6 +80,8 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(payload["workflow"], "self-check")
         self.assertIn("generated_at", payload)
         self.assertIn("diagnose", payload["supported_scenarios"])
+        self.assertIn("profile-show", payload["supported_scenarios"])
+        self.assertIn("memory-show", payload["supported_scenarios"])
         self.assertIn("market-cycle", payload["supported_scenarios"])
         self.assertIn("playbook", payload["supported_scenarios"])
         self.assertIn("news", payload["supported_scenarios"])
@@ -84,6 +93,7 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertIn("quotes", check_names)
         self.assertIn("consensus-eps", check_names)
         self.assertIn("iwencai-search", check_names)
+        self.assertIn("taoguba-community", check_names)
 
     def test_diagnose_returns_actionable_result(self) -> None:
         payload = ASharesSkill(config=make_offline_config()).diagnose("300750", date="2026-05-28")
@@ -93,6 +103,10 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertIn("strategy_system", payload)
         self.assertIn("market_cycle", payload["strategy_system"])
         self.assertIn("trade_setup", payload["strategy_system"])
+        self.assertIn("community", payload["strategy_system"])
+        self.assertIn("time_context", payload)
+        self.assertIn("evidence_plan", payload)
+        self.assertIn("recent_catalysts", payload)
         self.assertIn(payload["strategy_system"]["market_cycle"]["stage"], {"犹豫期/试探期", "亢奋期/加速期", "退潮期/补跌期"})
 
     def test_risk_scan_blocks_stocks_with_red_flags(self) -> None:
@@ -162,8 +176,108 @@ class SkillCompatibilityTests(unittest.TestCase):
         parser = build_parser()
         args = _apply_runtime_defaults(parser.parse_args(["quick-research", "--code", "300750"]))
         self.assertEqual(args.date, shanghai_today_str())
+        self.assertTrue(args.date_inferred)
         market_cycle_args = _apply_runtime_defaults(parser.parse_args(["market-cycle"]))
         self.assertEqual(market_cycle_args.date, shanghai_today_str())
+        self.assertTrue(market_cycle_args.date_inferred)
+
+    def test_time_context_uses_previous_trade_day_pre_market(self) -> None:
+        context = build_intent_time_context(
+            "market-cycle",
+            None,
+            now=datetime(2026, 6, 1, 8, 30, tzinfo=SHANGHAI_TZ),
+        ).to_dict()
+        self.assertEqual(context["session"], "pre-market")
+        self.assertEqual(context["analysis_date"], "2026-05-29")
+        self.assertEqual(context["evidence_plan"]["community"]["window"], "recent_1d")
+
+    def test_market_cycle_and_research_include_time_context(self) -> None:
+        skill = ASharesSkill(config=make_offline_config())
+        with patch("src.core.time_context.shanghai_now", return_value=datetime(2026, 6, 1, 8, 30, tzinfo=SHANGHAI_TZ)):
+            market_cycle = skill.market_cycle_report()
+            research = skill.quick_research("300750")
+        self.assertEqual(market_cycle["time_context"]["session"], "pre-market")
+        self.assertEqual(market_cycle["time_context"]["analysis_date"], "2026-05-29")
+        self.assertIn("evidence_plan", market_cycle)
+        self.assertIn("evidence_basis", market_cycle)
+        self.assertEqual(research["time_context"]["session"], "pre-market")
+        self.assertEqual(research["time_context"]["analysis_date"], "2026-05-29")
+        self.assertIn("news", research)
+        self.assertIn("announcements", research)
+        self.assertGreaterEqual(research["coverage"]["news_count"], 1)
+        self.assertGreaterEqual(research["coverage"]["announcement_count"], 1)
+
+    def test_user_profile_and_memory_persist_and_affect_workflows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_offline_cache_config(temp_dir)
+            skill = ASharesSkill(config=config)
+            profile = skill.update_user_profile(
+                risk_preference="稳健型",
+                default_horizon="波段",
+                preferred_sectors=["储能"],
+                avoided_sectors=["白酒"],
+                watchlist=["300750"],
+                focus_styles=["主线龙头"],
+                notes=["少做追高"],
+            )
+            self.assertEqual(profile["preferences"]["risk_preference"], "稳健型")
+
+            skill.add_memory_note("300750", "关注回踩承接")
+            diagnosis = skill.diagnose("300750", horizon=None, risk_preference=None, date="2026-05-28")
+            memory_payload = skill.user_memory("300750")
+            picks = skill.pick(["basic", "tech"])
+
+            self.assertEqual(diagnosis["preference_alignment"]["risk_preference"], "稳健型")
+            self.assertEqual(diagnosis["preference_alignment"]["default_horizon"], "波段")
+            self.assertTrue(diagnosis["preference_alignment"]["watchlist_match"])
+            self.assertTrue(diagnosis["preference_alignment"]["preferred_sector_match"])
+            self.assertIn("300750", memory_payload["memory"]["stock_notes"])
+            self.assertTrue(memory_payload["memory"]["recent_workflows"])
+            self.assertIn("300750", memory_payload["memory"]["stock_profiles"])
+            self.assertTrue(memory_payload["memory"]["theme_profiles"])
+            self.assertEqual(picks[0]["code"], "300750")
+            self.assertTrue(picks[0]["user_preference"]["watchlist_match"])
+            self.assertTrue(picks[0]["user_preference"]["preferred_sector_match"])
+
+            reloaded_skill = ASharesSkill(config=config)
+            persisted_profile = reloaded_skill.user_profile()
+            self.assertEqual(persisted_profile["preferences"]["risk_preference"], "稳健型")
+            self.assertIn("300750", persisted_profile["memory"]["recent_stocks"])
+            self.assertIn("300750", persisted_profile["memory"]["stock_profiles"])
+
+    def test_memory_clear_removes_stock_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_offline_cache_config(temp_dir)
+            skill = ASharesSkill(config=config)
+            skill.add_memory_note("300750", "短线观察")
+            skill.diagnose("300750", date="2026-05-28")
+            cleared = skill.clear_memory("300750")
+            self.assertEqual(cleared["memory"]["stock_notes"], {})
+            self.assertEqual(cleared["memory"]["stock_profiles"], {})
+            memory = skill.user_memory("300750")
+            self.assertEqual(memory["memory"]["stock_notes"], {"300750": []})
+            self.assertEqual(memory["memory"]["stock_profiles"], {"300750": {}})
+
+    def test_stock_and_theme_profiles_evolve_with_repeated_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_offline_cache_config(temp_dir)
+            skill = ASharesSkill(config=config)
+            skill.quick_research("300750", "2026-05-28")
+            skill.diagnose("300750", date="2026-05-28")
+            skill.thematic_research(["机器人", "储能"], "report", 2, 1)
+
+            memory = skill.user_memory("300750")["memory"]
+            stock_profile = memory["stock_profiles"]["300750"]
+            self.assertGreaterEqual(stock_profile["observation_count"], 2)
+            self.assertEqual(stock_profile["last_style"], "主线龙头")
+            self.assertIn("动力电池", stock_profile["concept_tags"])
+            self.assertIn("储能", stock_profile["theme_links"])
+
+            full_memory = skill.user_profile()["memory"]
+            self.assertIn("储能", full_memory["theme_profiles"])
+            self.assertIn("机器人", full_memory["theme_profiles"])
+            self.assertGreaterEqual(full_memory["theme_profiles"]["储能"]["observation_count"], 1)
+            self.assertIn("300750", full_memory["theme_profiles"]["储能"]["related_stocks"])
 
     def test_full_stack_skill_endpoints_work_in_offline_mode(self) -> None:
         skill = ASharesSkill(config=make_offline_config())
@@ -176,6 +290,10 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertTrue(skill.fund_flow("300750", "120d", 5)["items"])
         self.assertTrue(skill.sector_rankings(2)["top"])
         self.assertTrue(skill.hot_stocks("2026-05-28", 2)["items"])
+        self.assertTrue(skill.taoguba_hot(2)["items"])
+        self.assertTrue(skill.taoguba_market_sentiment(5)["hot_topics"])
+        self.assertTrue(skill.taoguba_stock_sentiment("300750", 5)["comments"])
+        self.assertTrue(skill.taoguba_vip_views("300750", 3)["items"])
         self.assertTrue(skill.concept_blocks("300750")["concept"])
         self.assertTrue(skill.research_reports("300750", 2)["items"])
         self.assertTrue(skill.dragon_tiger("300750", "2026-05-28", 30)["records"])
@@ -198,6 +316,9 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(market_cycle["workflow"], "market-cycle")
         self.assertEqual(playbook["workflow"], "playbook")
         self.assertIn("buy_strategy", market_cycle["playbook"])
+        self.assertIn("community", market_cycle)
+        self.assertIn("time_context", market_cycle)
+        self.assertIn("evidence_plan", market_cycle)
         self.assertIn("entry_signals", playbook["playbook"])
         self.assertTrue(picks)
         self.assertIn("methodology_score", picks[0])
@@ -213,6 +334,9 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(research["workflow"], "quick-research")
         self.assertIn("summary", research)
         self.assertIn("strategy_system", research)
+        self.assertIn("community", research)
+        self.assertIn("time_context", research)
+        self.assertIn("evidence_plan", research)
         self.assertTrue(skill.price_bars("300750", 4, 3)["items"])
         self.assertTrue(skill.order_book("300750")["bids"])
         self.assertTrue(skill.transactions("300750", 0, 3)["items"])
@@ -270,6 +394,61 @@ class SkillCompatibilityTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(len(payload["items"]), 2)
         self.assertEqual(payload["items"][0]["code"], "300750")
+
+    def test_run_skill_cli_supports_taoguba_hot_command(self) -> None:
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "A_SHARE_SKILL_OFFLINE_MODE": "true",
+        }
+        result = subprocess.run(
+            [sys.executable, "scripts/run_skill.py", "--format", "json", "taoguba-hot", "--page-size", "2"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["available"])
+        self.assertEqual(len(payload["items"]), 2)
+
+    def test_run_skill_cli_supports_taoguba_sentiment_command(self) -> None:
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "A_SHARE_SKILL_OFFLINE_MODE": "true",
+        }
+        result = subprocess.run(
+            [sys.executable, "scripts/run_skill.py", "--format", "json", "taoguba-sentiment", "--page-size", "5"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["available"])
+        self.assertTrue(payload["hot_topics"])
+
+    def test_run_skill_cli_supports_taoguba_stock_command(self) -> None:
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "A_SHARE_SKILL_OFFLINE_MODE": "true",
+        }
+        result = subprocess.run(
+            [sys.executable, "scripts/run_skill.py", "--format", "json", "taoguba-stock", "--code", "宁德时代", "--page-size", "3"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["stock_code"], "300750")
+        self.assertTrue(payload["comments"])
 
     def test_run_skill_cli_supports_quotes_command(self) -> None:
         env = {
@@ -393,6 +572,79 @@ class SkillCompatibilityTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["workflow"], "market-cycle")
         self.assertIn("playbook", payload)
+
+    def test_run_skill_cli_supports_profile_and_memory_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "A_SHARE_SKILL_OFFLINE_MODE": "true",
+                "DATA_CACHE_DIR": temp_dir,
+            }
+            subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/run_skill.py",
+                    "--format",
+                    "json",
+                    "profile-set",
+                    "--risk-preference",
+                    "稳健型",
+                    "--default-horizon",
+                    "波段",
+                    "--preferred-sectors",
+                    "储能,机器人",
+                    "--watchlist",
+                    "300750",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/run_skill.py",
+                    "--format",
+                    "json",
+                    "memory-note",
+                    "--code",
+                    "300750",
+                    "--note",
+                    "重点观察承接",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            result = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "profile-show"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["preferences"]["risk_preference"], "稳健型")
+            self.assertIn("300750", payload["preferences"]["watchlist"])
+            self.assertIn("300750", payload["memory"]["stock_notes"])
+
+            diagnosis = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "diagnose", "--code", "300750", "--date", "2026-05-28"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            diagnosis_payload = json.loads(diagnosis.stdout)
+            self.assertEqual(diagnosis_payload["preference_alignment"]["risk_preference"], "稳健型")
+            self.assertEqual(diagnosis_payload["preference_alignment"]["default_horizon"], "波段")
 
     def test_run_skill_cli_supports_playbook_command(self) -> None:
         env = {
@@ -1072,6 +1324,38 @@ class SkillCompatibilityTests(unittest.TestCase):
           </tbody>
         </table>
         """
+        taoguba_dianzan_html = """
+        <div class="article-card">
+          <a href="/a/demo-1" title="机器人主线继续加强 300750 低吸窗口"></a>
+          <span data-userid="134434"></span>
+          <a class="name">炒股养家</a>
+          <span>点赞 2680</span>
+          <span>评论 192</span>
+        </div>
+        <div class="article-card">
+          <a href="/a/demo-2" title="储能回流看中军 002594 趋势机会"></a>
+          <span data-userid="252069"></span>
+          <a class="name">柏拉爱空</a>
+          <span>点赞 1730</span>
+          <span>评论 121</span>
+        </div>
+        """
+        taoguba_article_detail = """
+        <html>
+          <body>
+            <p>机器人和算力仍是主线，300750 分歧后承接不错。</p>
+            <p>如果继续加强，可以关注低吸而不是追高。</p>
+          </body>
+        </html>
+        """
+        taoguba_quote_html = """
+        <script>
+        coolAttr = [
+          {"id":"c1","userID":"134434","userName":"炒股养家","content":"宁德时代作为主线核心，分歧不破位仍可低吸。","likes":"328","replyNum":"18","createTime":"2026-05-29 09:43:00"},
+          {"id":"c2","userID":"999999","userName":"短线观察员","content":"午后如果跌破均线，情绪可能转弱。","likes":"45","replyNum":"9","createTime":"2026-05-29 13:11:00"}
+        ];
+        </script>
+        """
         quote_text = (
             'v_sz300750="51~宁德时代~300750~424.79~415.68~423.00~~~~~~~ ~20260529140101~8.55~2.06~430.86~416.55~424.79/373574/15867486208~373574~1586749~1.25~24.30~~430.86~416.55~3.44~410.88~380.12~4.52~457.25~374.11~1.98";'
             'v_sh000001="1~上证指数~000001~3098.76~3075.20~3080.00~~~~~~~ ~20260529140101~23.56~0.77~3102.50~3068.90~0/0/154000000000~0~1540000~0.00~0.00~~3102.50~3068.90~1.09~0~0~0~0~0~0";'
@@ -1095,6 +1379,12 @@ class SkillCompatibilityTests(unittest.TestCase):
         def fake_get_text(url: str, encoding: str = "gbk") -> str:
             if "qt.gtimg.cn" in url:
                 return quote_text
+            if url == "https://www.tgb.cn/dianzan":
+                return taoguba_dianzan_html
+            if url in {"https://www.tgb.cn/a/demo-1", "https://www.tgb.cn/a/demo-2"}:
+                return taoguba_article_detail
+            if url == "https://www.tgb.cn/quotes/sz300750":
+                return taoguba_quote_html
             if "search-api-web.eastmoney.com" in url:
                 return f"jQuery_news({news_jsonp})"
             if "basic.10jqka.com.cn" in url:
@@ -1168,6 +1458,10 @@ class SkillCompatibilityTests(unittest.TestCase):
             f10_profile = provider.get_f10_profile("300750", "最新提示")
             finance = provider.get_financial_report("300750", "lrb", 1)
             consensus = provider.get_consensus_eps("300750")
+            taoguba_hot = provider.get_taoguba_hot_articles(2, include_content=True)
+            taoguba_sentiment = provider.get_taoguba_market_sentiment(2)
+            taoguba_stock = provider.get_taoguba_stock_sentiment("300750", 5)
+            taoguba_vip = provider.get_taoguba_vip_views("300750", 3)
             with patch.object(provider, "_http_post_json", side_effect=[iwencai_search_payload, iwencai_query_payload]):
                 iwencai_search = provider.iwencai_search("机器人", "report", 5)
                 iwencai_query = provider.iwencai_query("宁德时代 ROE", 1, 5)
@@ -1211,6 +1505,16 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertIn("最新提示", f10_profile)
         self.assertEqual(finance[0]["报告日"], "2026-03-31")
         self.assertEqual(consensus[0]["mean"], 20.77)
+        self.assertEqual(len(taoguba_hot), 2)
+        self.assertTrue(taoguba_hot[0]["author_is_vip"])
+        self.assertIn("300750", taoguba_hot[0]["symbols"])
+        self.assertTrue(taoguba_hot[0]["content"])
+        self.assertEqual(taoguba_sentiment["forum"], "taoguba")
+        self.assertTrue(taoguba_sentiment["hot_topics"])
+        self.assertEqual(taoguba_stock["stock_code"], "300750")
+        self.assertEqual(taoguba_stock["comments"][0]["stance"], "bullish")
+        self.assertGreaterEqual(len(taoguba_stock["vip_views"]), 1)
+        self.assertEqual(taoguba_vip[0]["author_name"], "炒股养家")
         self.assertEqual(len(iwencai_search), 1)
         self.assertEqual(iwencai_query[0]["股票代码"], "300750")
 
@@ -1235,6 +1539,8 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(research["strategy_system"]["trade_setup"]["stock_code"], "300750")
         self.assertIn("discipline", research["strategy_system"])
         self.assertIn("playbook", research["strategy_system"])
+        self.assertIn("community", research["strategy_system"])
+        self.assertEqual(research["community"]["forum"], "taoguba")
 
 
 if __name__ == "__main__":

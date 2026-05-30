@@ -14,7 +14,7 @@ metadata: {"openclaw":{"emoji":"📈","homepage":"https://github.com/tinylion102
 
 # A-Shares Master Skill
 
-This skill uses the latest trusted online A-share data by default, then converts it into `诊股` / `选股` / `风控` / `盘前盘后复盘` / `市场周期判断` / `方法论执行手册` / `新闻` / `公告` / `资金流` / `行业轮动` / `热点强势股` / `概念板块` / `研报` / `龙虎榜` / `融资融券` / `大宗交易` / `股东户数` / `分红` / `解禁` / `北向资金` / `个股信息` / `批量实时行情` / `K线` / `五档盘口` / `逐笔成交` / `季报快照` / `F10 公司资料` / `财报三表` / `一致预期` / `估值` / `批量对比` / `主题研报批量检索` / `快速调研` / `iwencai 检索` output. Local fixtures remain available only for tests or controlled fallback.
+This skill uses the latest trusted online A-share data by default, then converts it into `诊股` / `选股` / `风控` / `盘前盘后复盘` / `市场周期判断` / `方法论执行手册` / `新闻` / `公告` / `资金流` / `行业轮动` / `热点强势股` / `淘股吧热点` / `淘股吧舆情` / `淘股吧个股情绪` / `淘股吧大V观点` / `概念板块` / `研报` / `龙虎榜` / `融资融券` / `大宗交易` / `股东户数` / `分红` / `解禁` / `北向资金` / `个股信息` / `批量实时行情` / `K线` / `五档盘口` / `逐笔成交` / `季报快照` / `F10 公司资料` / `财报三表` / `一致预期` / `估值` / `批量对比` / `主题研报批量检索` / `快速调研` / `iwencai 检索` output. Local fixtures remain available only for tests or controlled fallback.
 
 The three flagship workflows, `valuation`, `quick-research`, and `theme-research`, now share a common machine-friendly envelope with `workflow`, `generated_at`, `input`, `degraded`, `errors`, `coverage`, and `summary`. `self-check` also reports dependency state, credential state, capability checks, and recommended actions.
 
@@ -24,6 +24,7 @@ The three flagship workflows, `valuation`, `quick-research`, and `theme-research
 - The user wants a pre-market view, post-market review, or a two-scenario trading plan.
 - The agent needs current A-share quotes, turnover, MA20, support, and resistance from live upstreams.
 - The user wants stock news, CNInfo announcements, intraday fund flow, sector rotation, THS hot stocks, concept tags, Eastmoney research reports, dragon-tiger seats, margin data, block trades, holder changes, dividend history, northbound flow, stock basics, batch quotes, K-line bars, five-level order book, tick transactions, quarterly snapshots, F10 company text, financial statements, THS consensus EPS, valuation comparison, thematic report research, or iwencai semantic search.
+- The user wants Taoguba forum hotspots, market sentiment, retail mood for a stock, or curated VIP viewpoints.
 - The agent must use `terminal` with a single, stable entrypoint that works in both OpenClaw and Hermes-style environments.
 
 ## Prerequisites
@@ -61,6 +62,10 @@ python3 scripts/run_skill.py announcements --code 300750 --page-size 3
 python3 scripts/run_skill.py fund-flow --code 300750 --period minute
 python3 scripts/run_skill.py sectors --top 5
 python3 scripts/run_skill.py hot-stocks --page-size 5
+python3 scripts/run_skill.py taoguba-hot --page-size 5
+python3 scripts/run_skill.py taoguba-sentiment --page-size 10
+python3 scripts/run_skill.py taoguba-stock --code 300750 --page-size 10
+python3 scripts/run_skill.py taoguba-vip --code 300750 --page-size 5
 python3 scripts/run_skill.py concept-blocks --code 300750
 python3 scripts/run_skill.py reports --code 300750 --page-size 3
 python3 scripts/run_skill.py dragon-tiger --code 002428 --date 2026-05-28
@@ -129,6 +134,10 @@ Examples:
   Run `diagnose`, and use `playbook` if the user also wants entry/add/reduce/exit rules.
 - `帮我看一下比亚迪风险大不大。`
   Run `risk`.
+- `淘股吧今天最热在聊什么？`
+  Run `taoguba-sentiment`, and use `taoguba-hot` if the user wants the underlying posts.
+- `宁德时代在淘股吧的情绪怎么样，有没有大V观点？`
+  Run `taoguba-stock`, and use `taoguba-vip` if the user wants more VIP posts.
 - `今天有哪些值得看的票？`
   Run `pick`, optionally followed by `hot-stocks` or `sectors` when the user asks for why they are strong.
 - `查一下宁德时代最近公告、资金流和研报。`
@@ -150,19 +159,20 @@ Examples:
 8. If the user asks for event flow, call `news`, `telegraph`, `global-news`, or `announcements`.
 9. If the user asks for资金面 or 行业轮动, call `fund-flow` or `sectors`.
 10. If the user asks for强势股归因 or 题材热点, call `hot-stocks`.
-11. If the user asks for个股所属概念、概念标签 or 题材归属, call `concept-blocks`.
-12. If the user asks for卖方观点 or 机构覆盖, call `reports`.
-13. If the user asks for席位资金、连板观察 or 全市场龙虎榜, call `dragon-tiger` or `daily-dragon-tiger`.
-14. If the user asks for两融、筹码集中、大宗成交、分红回报 or 解禁预警, call `margin`, `holders`, `block-trades`, `dividends`, or `lockup`.
-15. If the user asks for指数、ETF or 批量实时行情, call `quotes`.
-16. If the user asks for个股估值、PEG、PE消化 or 批量估值对比, call `valuation` or `compare`.
-17. If the user asks for主题研报聚合、跨主题研报批量检索 or 主题补充研报, call `theme-research`.
-18. If the user asks for新标的快速调研, call `quick-research`.
-19. If the user asks for个股K线、五档盘口 or 逐笔成交, call `kline`, `order-book`, or `transactions`.
-20. If the user asks for北向资金、个股基本面、季报快照、F10资料、财务报表 or 一致预期, call `northbound`, `stock-info`, `quarterly-snapshot`, `f10`, `finance`, or `consensus-eps`.
-21. If the user asks for跨主题语义检索 or 结构化问财查询, call `iwencai-search` or `iwencai-query`.
-22. Use `--format json` when another agent or tool will parse the output.
-23. If live data is unavailable, fail clearly unless the caller explicitly enabled offline fallback.
+11. If the user asks for淘股吧热点、大V观点、市场舆情 or 个股股民情绪, call `taoguba-hot`, `taoguba-sentiment`, `taoguba-stock`, or `taoguba-vip`.
+12. If the user asks for个股所属概念、概念标签 or 题材归属, call `concept-blocks`.
+13. If the user asks for卖方观点 or 机构覆盖, call `reports`.
+14. If the user asks for席位资金、连板观察 or 全市场龙虎榜, call `dragon-tiger` or `daily-dragon-tiger`.
+15. If the user asks for两融、筹码集中、大宗成交、分红回报 or 解禁预警, call `margin`, `holders`, `block-trades`, `dividends`, or `lockup`.
+16. If the user asks for指数、ETF or 批量实时行情, call `quotes`.
+17. If the user asks for个股估值、PEG、PE消化 or 批量估值对比, call `valuation` or `compare`.
+18. If the user asks for主题研报聚合、跨主题研报批量检索 or 主题补充研报, call `theme-research`.
+19. If the user asks for新标的快速调研, call `quick-research`.
+20. If the user asks for个股K线、五档盘口 or 逐笔成交, call `kline`, `order-book`, or `transactions`.
+21. If the user asks for北向资金、个股基本面、季报快照、F10资料、财务报表 or 一致预期, call `northbound`, `stock-info`, `quarterly-snapshot`, `f10`, `finance`, or `consensus-eps`.
+22. If the user asks for跨主题语义检索 or 结构化问财查询, call `iwencai-search` or `iwencai-query`.
+23. Use `--format json` when another agent or tool will parse the output.
+24. If live data is unavailable, fail clearly unless the caller explicitly enabled offline fallback.
 
 ## Pitfalls
 

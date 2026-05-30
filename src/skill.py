@@ -8,9 +8,11 @@ from typing import Optional
 
 from src.config import Config
 from src.core import AnalysisPipeline, IntegratedAnalyzer, RiskChecker
+from src.core.time_context import build_intent_time_context
 from src.modules import HighPRStockPicker, PostMarketAnalyzer, PreMarketAnalyzer, TradingPlanGenerator
 from src.providers import MarketDataProvider, build_provider
-from src.utils.time import shanghai_timestamp_iso, shanghai_today_str
+from src.user_context import UserContextStore
+from src.utils.time import shanghai_timestamp_iso
 
 
 class ASharesSkill:
@@ -28,6 +30,7 @@ class ASharesSkill:
         self.pre_market = PreMarketAnalyzer(self.config, self.provider)
         self.post_market = PostMarketAnalyzer(self.config, self.provider)
         self.trading_plan = TradingPlanGenerator(self.config, self.provider)
+        self.user_context = UserContextStore(self.config)
 
     def _timestamp(self) -> str:
         return shanghai_timestamp_iso()
@@ -106,14 +109,184 @@ class ASharesSkill:
     def _resolve_stock_inputs(self, stock_identifiers: list[str]) -> list[dict[str, str]]:
         return [self._resolve_stock_input(item) for item in stock_identifiers]
 
+    def _community_summary(self, payload: dict) -> dict:
+        return {
+            "available": payload.get("available", False),
+            "forum": payload.get("forum", "taoguba"),
+            "sentiment_score": payload.get("sentiment_score"),
+            "mood": payload.get("mood", "未知"),
+            "consensus_level": payload.get("consensus_level", ""),
+            "hot_topics": payload.get("hot_topics", []),
+            "vip_focus": payload.get("vip_focus", []),
+            "vip_views": payload.get("vip_views", []),
+            "comment_count": payload.get("comment_count", 0),
+            "error": payload.get("error", ""),
+        }
+
+    def _build_time_context(
+        self,
+        intent: str,
+        requested_date: str | None = None,
+        *,
+        horizon: str | None = None,
+    ) -> dict:
+        return build_intent_time_context(intent, requested_date, horizon=horizon).to_dict()
+
+    def _user_context_payload(self, stock_code: str | None = None) -> dict:
+        return self.user_context.build_context(stock_code)
+
+    def _remember(
+        self,
+        workflow: str,
+        *,
+        stock_code: str | None = None,
+        stock_name: str | None = None,
+        summary: str | None = None,
+    ) -> None:
+        self.user_context.remember_workflow(
+            workflow,
+            stock_code=stock_code,
+            stock_name=stock_name,
+            summary=summary,
+        )
+
+    def _observe_stock_memory(
+        self,
+        stock_code: str,
+        *,
+        stock_name: str,
+        sector: str,
+        style: str,
+        setup: str,
+        market_stage: str,
+        community_mood: str,
+        methodology_score: float | None,
+        watchlist_match: bool,
+        tags: list[str] | None = None,
+        concept_tags: list[str] | None = None,
+        catalysts: list[str] | None = None,
+        notes: list[str] | None = None,
+        themes: list[str] | None = None,
+        summary: str | None = None,
+    ) -> None:
+        self.user_context.observe_stock_profile(
+            stock_code,
+            {
+                "stock_name": stock_name,
+                "sector": sector,
+                "style": style,
+                "setup": setup,
+                "market_stage": market_stage,
+                "community_mood": community_mood,
+                "methodology_score": methodology_score,
+                "watchlist_match": watchlist_match,
+                "tags": tags or [],
+                "concept_tags": concept_tags or [],
+                "catalysts": catalysts or [],
+                "notes": notes or [],
+                "themes": themes or [],
+                "summary": summary or "",
+            },
+        )
+
+    def _observe_themes(
+        self,
+        themes: list[str],
+        *,
+        source: str,
+        market_stage: str = "",
+        community_mood: str = "",
+        related_stocks: list[str] | None = None,
+        reasons: list[str] | None = None,
+        linked_tags: list[str] | None = None,
+        heat_score: float | None = None,
+        summary: str | None = None,
+    ) -> None:
+        for theme in themes:
+            self.user_context.observe_theme_profile(
+                theme,
+                {
+                    "source": source,
+                    "market_stage": market_stage,
+                    "community_mood": community_mood,
+                    "related_stocks": related_stocks or [],
+                    "reasons": reasons or [],
+                    "linked_tags": linked_tags or [],
+                    "heat_score": heat_score,
+                    "summary": summary or "",
+                },
+            )
+
+    def user_profile(self) -> dict:
+        preferences = self.user_context.load_preferences().to_dict()
+        memory = self.user_context.load_memory().to_dict()
+        payload = self._workflow_meta("profile-show", {})
+        payload.update({"preferences": preferences, "memory": memory})
+        return payload
+
+    def update_user_profile(
+        self,
+        *,
+        risk_preference: str | None = None,
+        default_horizon: str | None = None,
+        preferred_sectors: list[str] | None = None,
+        avoided_sectors: list[str] | None = None,
+        watchlist: list[str] | None = None,
+        focus_styles: list[str] | None = None,
+        notes: list[str] | None = None,
+    ) -> dict:
+        preferences = self.user_context.update_preferences(
+            risk_preference=risk_preference,
+            default_horizon=default_horizon,
+            preferred_sectors=preferred_sectors,
+            avoided_sectors=avoided_sectors,
+            watchlist=watchlist,
+            focus_styles=focus_styles,
+            notes=notes,
+        ).to_dict()
+        payload = self._workflow_meta("profile-set", {})
+        payload.update({"preferences": preferences})
+        return payload
+
+    def user_memory(self, stock_code: str | None = None) -> dict:
+        payload = self._workflow_meta("memory-show", {"stock_code": stock_code} if stock_code else {})
+        payload.update(self._user_context_payload(stock_code))
+        return payload
+
+    def add_memory_note(self, stock_code: str, note: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
+        memory = self.user_context.add_stock_note(stock_code, note).to_dict()
+        payload = self._workflow_meta("memory-note", {"stock_code": stock_code, "note": note})
+        payload.update(self._resolved_stock_meta(resolved))
+        payload["memory"] = memory
+        return payload
+
+    def clear_memory(self, stock_code: str | None = None) -> dict:
+        resolved_meta: dict[str, Any] = {}
+        if stock_code:
+            resolved = self._resolve_stock_input(stock_code)
+            stock_code = resolved["code"]
+            resolved_meta = self._resolved_stock_meta(resolved)
+        memory = self.user_context.clear_memory(stock_code).to_dict()
+        payload = self._workflow_meta("memory-clear", {"stock_code": stock_code} if stock_code else {})
+        payload.update(resolved_meta)
+        payload["memory"] = memory
+        return payload
+
     def diagnose(
         self,
         stock_code: str,
         scenario: str = "诊股",
-        horizon: str = "短线",
-        risk_preference: str = "平衡型",
+        horizon: str | None = None,
+        risk_preference: str | None = None,
         date: str | None = None,
     ) -> dict:
+        preferences = self.user_context.load_preferences()
+        horizon = horizon or preferences.default_horizon
+        risk_preference = risk_preference or preferences.risk_preference
+        time_context = self._build_time_context("diagnose", date, horizon=horizon)
+        effective_date = time_context["analysis_date"]
         resolved = self._resolve_stock_input(stock_code)
         stock_code = resolved["code"]
         payload = self.pipeline.run_standard_flow(
@@ -121,32 +294,129 @@ class ASharesSkill:
             scenario=scenario,
             horizon=horizon,
             risk_preference=risk_preference,
-            date=date,
+            date=effective_date,
         )
+        evidence_plan = time_context["evidence_plan"]
+        news = self.stock_news(stock_code, evidence_plan["news"]["page_size"])
+        announcements = self.announcements(stock_code, evidence_plan["announcements"]["page_size"])
         payload["strategy_system"] = {
-            "market_cycle": self.analyzer.assess_market_cycle(date),
-            "trade_setup": self.analyzer.evaluate_trade_setup(stock_code, date),
-            "discipline": self.analyzer.build_trade_discipline(stock_code, date),
+            "market_cycle": self.analyzer.assess_market_cycle(effective_date),
+            "trade_setup": self.analyzer.evaluate_trade_setup(stock_code, effective_date),
+            "discipline": self.analyzer.build_trade_discipline(stock_code, effective_date),
+            "community": self.analyzer.analyze_stock_community(stock_code, evidence_plan["community"]["page_size"]),
+        }
+        payload["time_context"] = time_context
+        payload["evidence_plan"] = evidence_plan
+        payload["user_context"] = self._user_context_payload(stock_code)
+        payload["recent_catalysts"] = {
+            "news": news.get("items", []),
+            "announcements": announcements.get("items", []),
+        }
+        payload["preference_alignment"] = {
+            "risk_preference": risk_preference,
+            "default_horizon": horizon,
+            "watchlist_match": stock_code in preferences.watchlist,
+            "preferred_sector_match": resolved.get("name", "") in preferences.preferred_sectors,
         }
         payload.update(self._resolved_stock_meta(resolved))
+        payload["preference_alignment"]["preferred_sector_match"] = (
+            self.provider.get_stock_snapshot(stock_code).sector in preferences.preferred_sectors
+        )
+        stock_snapshot = self.provider.get_stock_snapshot(stock_code)
+        trade_setup = payload["strategy_system"]["trade_setup"]
+        community = payload["strategy_system"]["community"]
+        self._observe_stock_memory(
+            stock_code,
+            stock_name=resolved.get("name", "") or stock_snapshot.name,
+            sector=stock_snapshot.sector,
+            style=trade_setup.get("style", ""),
+            setup=trade_setup.get("setup", ""),
+            market_stage=trade_setup.get("market_stage", ""),
+            community_mood=community.get("mood", ""),
+            methodology_score=trade_setup.get("methodology_score"),
+            watchlist_match=payload["preference_alignment"]["watchlist_match"],
+            tags=trade_setup.get("tags", []),
+            catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
+            notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
+            themes=[stock_snapshot.sector],
+            summary=payload["conclusion"].get("summary", ""),
+        )
+        self._observe_themes(
+            [stock_snapshot.sector],
+            source="diagnose",
+            market_stage=trade_setup.get("market_stage", ""),
+            community_mood=community.get("mood", ""),
+            related_stocks=[stock_code],
+            reasons=trade_setup.get("reasons", []),
+            linked_tags=trade_setup.get("tags", []),
+            summary=payload["conclusion"].get("summary", ""),
+        )
+        self._remember(
+            "diagnose",
+            stock_code=stock_code,
+            stock_name=resolved.get("name", ""),
+            summary=payload["conclusion"].get("summary", ""),
+        )
         return payload
 
     def risk(self, stock_code: str, date: str | None = None) -> dict:
+        time_context = self._build_time_context("risk", date)
+        effective_date = time_context["analysis_date"]
         resolved = self._resolve_stock_input(stock_code)
         stock_code = resolved["code"]
-        payload = self.risk_checker.check(stock_code, date).to_dict()
-        payload["strategy_discipline"] = self.analyzer.build_trade_discipline(stock_code, date)
+        payload = self.risk_checker.check(stock_code, effective_date).to_dict()
+        payload["strategy_discipline"] = self.analyzer.build_trade_discipline(stock_code, effective_date)
+        payload["time_context"] = time_context
+        payload["evidence_plan"] = time_context["evidence_plan"]
+        payload["user_context"] = self._user_context_payload(stock_code)
         payload.update(self._resolved_stock_meta(resolved))
+        self._remember("risk", stock_code=stock_code, stock_name=resolved.get("name", ""), summary=payload["risk_level"])
         return payload
 
     def pick(self, filter_names: list[str]) -> list[dict]:
-        return [item.to_dict() for item in self.stock_picker.screen({"names": filter_names})]
+        preferences = self.user_context.load_preferences()
+        items = [item.to_dict() for item in self.stock_picker.screen({"names": filter_names})]
+        for item in items:
+            stock = self.provider.get_stock_snapshot(item["code"])
+            preferred_sector_match = stock.sector in preferences.preferred_sectors
+            avoided_sector_match = stock.sector in preferences.avoided_sectors
+            watchlist_match = item["code"] in preferences.watchlist
+            style_match = item["style"] in preferences.focus_styles if preferences.focus_styles else False
+            item["user_preference"] = {
+                "watchlist_match": watchlist_match,
+                "preferred_sector_match": preferred_sector_match,
+                "avoided_sector_match": avoided_sector_match,
+                "focus_style_match": style_match,
+            }
+            item["_preference_score"] = (
+                (2 if watchlist_match else 0)
+                + (1 if preferred_sector_match else 0)
+                + (1 if style_match else 0)
+                - (3 if avoided_sector_match else 0)
+            )
+        items.sort(key=lambda item: (item["_preference_score"], item["methodology_score"], item["risk_reward_ratio"]), reverse=True)
+        for item in items:
+            item.pop("_preference_score", None)
+        self._remember("pick", summary=",".join(item["code"] for item in items[:3]))
+        return items
 
-    def pre_market_report(self, date: str) -> dict:
-        return self.pre_market.generate_report(date).to_dict()
+    def pre_market_report(self, date: str | None = None) -> dict:
+        time_context = self._build_time_context("pre-market", date)
+        effective_date = time_context["analysis_date"]
+        payload = self.pre_market.generate_report(effective_date).to_dict()
+        payload["time_context"] = time_context
+        payload["evidence_plan"] = time_context["evidence_plan"]
+        payload["community"] = self.taoguba_market_sentiment(time_context["evidence_plan"]["community"]["page_size"])
+        return payload
 
-    def post_market_review(self, date: str) -> dict:
-        return self.post_market.generate_review(date).to_dict()
+    def post_market_review(self, date: str | None = None) -> dict:
+        time_context = self._build_time_context("post-market", date)
+        effective_date = time_context["analysis_date"]
+        payload = self.post_market.generate_review(effective_date).to_dict()
+        payload["time_context"] = time_context
+        payload["evidence_plan"] = time_context["evidence_plan"]
+        payload["community"] = self.taoguba_market_sentiment(time_context["evidence_plan"]["community"]["page_size"])
+        return payload
 
     def trading_plan_report(self, stock_code: str, date: str) -> dict:
         resolved = self._resolve_stock_input(stock_code)
@@ -155,13 +425,22 @@ class ASharesSkill:
         return payload
 
     def market_cycle_report(self, date: str | None = None) -> dict:
-        observe_date = date or shanghai_today_str()
+        time_context = self._build_time_context("market-cycle", date)
+        evidence_plan = time_context["evidence_plan"]
+        observe_date = time_context["analysis_date"]
         market = self.provider.get_market_snapshot(observe_date)
         playbook = self.analyzer.build_market_playbook(observe_date)
+        community = self.analyzer.analyze_community_sentiment(evidence_plan["community"]["page_size"])
+        telegraph = self.market_telegraph(evidence_plan["telegraph"]["page_size"])
+        hot_stocks = self.hot_stocks(evidence_plan["hot_stocks"]["trade_date"], evidence_plan["hot_stocks"]["page_size"])
+        northbound = self.northbound_flow(evidence_plan["northbound"]["history_days"])
         payload = self._workflow_meta("market-cycle", {"date": observe_date})
         payload.update(
             {
                 "date": observe_date,
+                "time_context": time_context,
+                "evidence_plan": evidence_plan,
+                "user_context": self._user_context_payload(),
                 "market_snapshot": {
                     "total_volume_billion": market.total_volume_billion,
                     "sentiment_score": market.sentiment_score,
@@ -171,18 +450,38 @@ class ASharesSkill:
                     "hot_sectors": list(market.hot_sectors),
                     "leaders": list(market.leaders),
                 },
+                "community": self._community_summary(community),
+                "evidence_basis": {
+                    "telegraph": telegraph.get("items", []),
+                    "hot_stocks": hot_stocks.get("items", []),
+                    "northbound": northbound.get("history", []),
+                },
                 "playbook": playbook,
                 "summary": {
                     "stage": playbook["stage"],
                     "environment": playbook["environment"],
                     "position_upper_bound": playbook["position_upper_bound"],
+                    "community_mood": community.get("mood", "未知"),
                 },
             }
         )
+        self._observe_themes(
+            list(market.hot_sectors) + [item.get("topic", "") for item in community.get("hot_topics", [])],
+            source="market-cycle",
+            market_stage=playbook["stage"],
+            community_mood=community.get("mood", ""),
+            related_stocks=[],
+            reasons=playbook.get("signal_stack", []),
+            linked_tags=list(market.hot_sectors),
+            heat_score=community.get("heat_score"),
+            summary=playbook.get("focus", ""),
+        )
+        self._remember("market-cycle", summary=playbook["stage"])
         return payload
 
     def strategy_playbook(self, stock_code: str, date: str | None = None) -> dict:
-        observe_date = date or shanghai_today_str()
+        time_context = self._build_time_context("playbook", date, horizon="短线")
+        observe_date = time_context["analysis_date"]
         resolved = self._resolve_stock_input(stock_code)
         stock_code = resolved["code"]
         playbook = self.analyzer.build_stock_playbook(stock_code, observe_date)
@@ -194,7 +493,14 @@ class ASharesSkill:
             {
                 "stock_code": stock_code,
                 "date": observe_date,
+                "time_context": time_context,
+                "evidence_plan": time_context["evidence_plan"],
                 "playbook": playbook,
+                "community": self.analyzer.analyze_stock_community(
+                    stock_code,
+                    time_context["evidence_plan"]["community"]["page_size"],
+                ),
+                "user_context": self._user_context_payload(stock_code),
                 "summary": {
                     "stock_name": playbook["stock_name"],
                     "stage": playbook["market_cycle"]["stage"],
@@ -205,7 +511,76 @@ class ASharesSkill:
             }
         )
         payload.update(self._resolved_stock_meta(resolved))
+        stock_snapshot = self.provider.get_stock_snapshot(stock_code)
+        community = payload.get("community", {})
+        self._observe_stock_memory(
+            stock_code,
+            stock_name=resolved.get("name", "") or stock_snapshot.name,
+            sector=stock_snapshot.sector,
+            style=playbook["trade_setup"].get("style", ""),
+            setup=playbook["trade_setup"].get("setup", ""),
+            market_stage=playbook["market_cycle"].get("stage", ""),
+            community_mood=community.get("mood", ""),
+            methodology_score=playbook["trade_setup"].get("methodology_score"),
+            watchlist_match=payload["user_context"]["memory"].get("is_watchlist_stock", False),
+            tags=playbook["trade_setup"].get("tags", []),
+            catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
+            notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
+            themes=[stock_snapshot.sector],
+            summary=playbook["trade_setup"].get("setup", ""),
+        )
+        self._remember("playbook", stock_code=stock_code, stock_name=resolved.get("name", ""), summary=playbook["trade_setup"]["setup"])
         return payload
+
+    def taoguba_hot(self, page_size: int = 10, include_content: bool = False) -> dict:
+        return self._safe_list_payload(
+            lambda: self.provider.get_taoguba_hot_articles(page_size, include_content),
+            {
+                "forum": "taoguba",
+                "provider": self.provider.source_name,
+                "include_content": include_content,
+            },
+        )
+
+    def taoguba_market_sentiment(self, page_size: int = 20) -> dict:
+        return self._safe_dict_payload(
+            lambda: self.provider.get_taoguba_market_sentiment(page_size),
+            {
+                "forum": "taoguba",
+                "provider": self.provider.source_name,
+                "hot_topics": [],
+                "vip_focus": [],
+                "articles": [],
+            },
+        )
+
+    def taoguba_stock_sentiment(self, stock_code: str, page_size: int = 30) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
+        payload = self._safe_dict_payload(
+            lambda: self.provider.get_taoguba_stock_sentiment(stock_code, page_size),
+            {
+                "forum": "taoguba",
+                "provider": self.provider.source_name,
+                **self._resolved_stock_meta(resolved),
+                "vip_views": [],
+                "comments": [],
+                "key_phrases": [],
+            },
+        )
+        payload.update(self._resolved_stock_meta(resolved))
+        return payload
+
+    def taoguba_vip_views(self, stock_code: str | None = None, page_size: int = 10) -> dict:
+        resolved_meta: dict[str, str] = {}
+        if stock_code:
+            resolved = self._resolve_stock_input(stock_code)
+            stock_code = resolved["code"]
+            resolved_meta = self._resolved_stock_meta(resolved)
+        return self._safe_list_payload(
+            lambda: self.provider.get_taoguba_vip_views(stock_code, page_size),
+            {"forum": "taoguba", "provider": self.provider.source_name, **resolved_meta},
+        )
 
     def stock_news(self, stock_code: str, page_size: int = 10) -> dict:
         resolved = self._resolve_stock_input(stock_code)
@@ -598,10 +973,24 @@ class ASharesSkill:
             },
             }
         )
+        theme_tokens = []
+        for query in queries:
+            theme_tokens.extend(token for token in query.replace("，", ",").split(",") if token.strip())
+        self._observe_themes(
+            theme_tokens,
+            source="theme-research",
+            related_stocks=seen_codes[:10],
+            reasons=[item.get("title", "") for item in articles[:5]],
+            linked_tags=theme_tokens,
+            summary=payload["summary"].get("top_article_title", ""),
+        )
+        self._remember("theme-research", summary=",".join(theme_tokens[:5]))
         return payload
 
     def quick_research(self, stock_code: str, trade_date: str | None = None) -> dict:
-        observe_date = trade_date or shanghai_today_str()
+        time_context = self._build_time_context("quick-research", trade_date, horizon="短线")
+        evidence_plan = time_context["evidence_plan"]
+        observe_date = time_context["analysis_date"]
         resolved = self._resolve_stock_input(stock_code)
         stock_code = resolved["code"]
         valuation = self.valuation(stock_code)
@@ -610,12 +999,15 @@ class ASharesSkill:
         discipline = self.analyzer.build_trade_discipline(stock_code, observe_date)
         playbook = self.analyzer.build_stock_playbook(stock_code, observe_date)
         concepts = self.concept_blocks(stock_code)
-        fund_flow = self.fund_flow(stock_code, "120d", 5)
-        dragon_tiger = self.dragon_tiger(stock_code, observe_date, 30)
-        lockup = self.lockup_expiry(stock_code, observe_date, 90)
-        margin = self.margin_trading(stock_code, 3)
-        holders = self.holder_numbers(stock_code, 3)
-        reports = self.research_reports(stock_code, 3)
+        fund_flow = self.fund_flow(stock_code, "120d", evidence_plan["fund_flow"]["limit"])
+        dragon_tiger = self.dragon_tiger(stock_code, evidence_plan["dragon_tiger"]["trade_date"], evidence_plan["dragon_tiger"]["look_back"])
+        lockup = self.lockup_expiry(stock_code, evidence_plan["lockup"]["trade_date"], evidence_plan["lockup"]["forward_days"])
+        margin = self.margin_trading(stock_code, evidence_plan["margin"]["page_size"])
+        holders = self.holder_numbers(stock_code, evidence_plan["holders"]["page_size"])
+        reports = self.research_reports(stock_code, evidence_plan["reports"]["page_size"])
+        news = self.stock_news(stock_code, evidence_plan["news"]["page_size"])
+        announcements = self.announcements(stock_code, evidence_plan["announcements"]["page_size"])
+        community = self.taoguba_stock_sentiment(stock_code, evidence_plan["community"]["page_size"])
         degraded_reasons: list[str] = []
         if valuation.get("available") is False:
             degraded_reasons.append("valuation_unavailable")
@@ -623,6 +1015,8 @@ class ASharesSkill:
             degraded_reasons.extend(item for item in valuation.get("degraded_reasons", []) if item not in degraded_reasons)
         if not reports.get("items"):
             degraded_reasons.append("reports_missing")
+        if community.get("available") is False:
+            degraded_reasons.append("community_unavailable")
         payload = self._workflow_meta(
             "quick-research",
             {"stock_code": stock_code, "stock_query": resolved["query"], "date": observe_date},
@@ -634,13 +1028,20 @@ class ASharesSkill:
             {
             "stock_code": stock_code,
             "date": observe_date,
+            "time_context": time_context,
+            "evidence_plan": evidence_plan,
+            "user_context": self._user_context_payload(stock_code),
             "coverage": {
                 "analyst_count": valuation.get("analyst_count", 0),
                 "has_consensus": valuation.get("eps_cur") is not None,
                 "report_count": len(reports.get("items", [])),
+                "news_count": len(news.get("items", [])),
+                "announcement_count": len(announcements.get("items", [])),
                 "concept_count": len(concepts.get("concept_tags", [])),
                 "margin_rows": len(margin.get("items", [])),
                 "holder_rows": len(holders.get("items", [])),
+                "community_comments": community.get("comment_count", 0),
+                "community_vip_views": len(community.get("vip_views", [])),
             },
             "summary": {
                 "stock_name": valuation.get("name", ""),
@@ -649,12 +1050,14 @@ class ASharesSkill:
                 "report_count": len(reports.get("items", [])),
                 "market_stage": market_cycle["stage"],
                 "style": strategy_setup["style"],
+                "community_mood": community.get("mood", "未知"),
             },
             "strategy_system": {
                 "market_cycle": market_cycle,
                 "trade_setup": strategy_setup,
                 "discipline": discipline,
                 "playbook": playbook,
+                "community": community,
             },
             "valuation": valuation,
             "concepts": concepts,
@@ -673,9 +1076,46 @@ class ASharesSkill:
             "margin": margin.get("items", []),
             "holders": holders.get("items", []),
             "reports": reports.get("items", []),
+            "news": news.get("items", []),
+            "announcements": announcements.get("items", []),
+            "community": community,
             }
         )
         payload.update(self._resolved_stock_meta(resolved))
+        stock_snapshot = self.provider.get_stock_snapshot(stock_code)
+        self._observe_stock_memory(
+            stock_code,
+            stock_name=resolved.get("name", "") or stock_snapshot.name,
+            sector=stock_snapshot.sector,
+            style=strategy_setup.get("style", ""),
+            setup=strategy_setup.get("setup", ""),
+            market_stage=market_cycle.get("stage", ""),
+            community_mood=community.get("mood", ""),
+            methodology_score=strategy_setup.get("methodology_score"),
+            watchlist_match=payload["user_context"]["memory"].get("is_watchlist_stock", False),
+            tags=strategy_setup.get("tags", []),
+            concept_tags=concepts.get("concept_tags", []),
+            catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
+            notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
+            themes=[stock_snapshot.sector] + list(concepts.get("concept_tags", [])),
+            summary=f"{strategy_setup.get('style', '')} / {community.get('mood', '未知')}",
+        )
+        self._observe_themes(
+            [stock_snapshot.sector] + list(concepts.get("concept_tags", [])),
+            source="quick-research",
+            market_stage=market_cycle.get("stage", ""),
+            community_mood=community.get("mood", ""),
+            related_stocks=[stock_code],
+            reasons=[strategy_setup.get("setup", ""), market_cycle.get("focus", "")],
+            linked_tags=strategy_setup.get("tags", []),
+            summary=f"{strategy_setup.get('style', '')} / {community.get('mood', '未知')}",
+        )
+        self._remember(
+            "quick-research",
+            stock_code=stock_code,
+            stock_name=resolved.get("name", ""),
+            summary=f"{strategy_setup['style']} / {community.get('mood', '未知')}",
+        )
         return payload
 
     def price_bars(self, stock_code: str, frequency: int = 4, limit: int = 20) -> dict:
@@ -957,6 +1397,17 @@ class ASharesSkill:
             degraded_capabilities.extend(["theme-research", "iwencai-search", "iwencai-query"])
             recommendations.append("Set `IWENCAI_API_KEY` to enable live theme research and iwencai search.")
 
+        taoguba_payload = self.taoguba_market_sentiment(5)
+        checks.append(
+            self._build_check(
+                "taoguba-community",
+                taoguba_payload.get("available", False),
+                taoguba_payload.get("error", f"returned {len(taoguba_payload.get('articles', []))} articles"),
+                status="ok" if taoguba_payload.get("available", False) else "warning",
+            )
+        )
+        if taoguba_payload.get("available") is False:
+            degraded_capabilities.extend(["taoguba-hot", "taoguba-sentiment", "taoguba-stock", "taoguba-vip"])
         overall_ok = config_valid and all(check["ok"] for check in checks if check["status"] not in {"warning", "skipped"})
         payload = self._workflow_meta("self-check", {}, available=overall_ok, degraded_reasons=sorted(set(degraded_capabilities)))
         payload.update(
@@ -973,6 +1424,11 @@ class ASharesSkill:
             "health_checks": checks,
             "recommended_actions": recommendations,
             "supported_scenarios": [
+                "profile-show",
+                "profile-set",
+                "memory-show",
+                "memory-note",
+                "memory-clear",
                 "diagnose",
                 "risk",
                 "pick",
@@ -988,6 +1444,10 @@ class ASharesSkill:
                 "fund-flow",
                 "sectors",
                 "hot-stocks",
+                "taoguba-hot",
+                "taoguba-sentiment",
+                "taoguba-stock",
+                "taoguba-vip",
                 "concept-blocks",
                 "reports",
                 "dragon-tiger",

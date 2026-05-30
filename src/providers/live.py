@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 from src.config import Config
 from src.models import MarketSnapshot, StockSnapshot
 from src.providers.base import DataNotFoundError, MarketDataProvider, OnlineDataError
+from src.providers.taoguba_authors import TAOGUBA_VIP_AUTHORS
 from src.utils.time import SHANGHAI_TZ, shanghai_today_str
 
 
@@ -418,6 +419,195 @@ class TencentLiveProvider(MarketDataProvider):
                 }
             )
         return result
+
+    def _extract_stock_codes(self, text: str) -> list[str]:
+        seen: set[str] = set()
+        results: list[str] = []
+        for code in re.findall(r"\b[0368]\d{5}\b", text or ""):
+            if code not in seen:
+                seen.add(code)
+                results.append(code)
+        return results
+
+    def _extract_taoguba_topics(self, text: str) -> list[str]:
+        candidates = [
+            "机器人",
+            "算力",
+            "光模块",
+            "储能",
+            "固态电池",
+            "低空经济",
+            "无人驾驶",
+            "减速器",
+            "人形机器人",
+            "情绪周期",
+            "分歧低吸",
+            "龙头",
+            "主线",
+        ]
+        return [item for item in candidates if item in (text or "")]
+
+    def _score_sentiment_texts(self, texts: list[str]) -> dict[str, Any]:
+        bullish_terms = ("看多", "看好", "主升", "龙头", "低吸", "回流", "承接", "加强", "新高", "强势", "抱团")
+        bearish_terms = ("看空", "退潮", "补跌", "走弱", "砸盘", "亏钱", "减仓", "跌破", "兑现", "谨慎", "风险")
+        bullish_hits = 0
+        bearish_hits = 0
+        for text in texts:
+            normalized = self._normalize_text(text)
+            bullish_hits += sum(normalized.count(term) for term in bullish_terms)
+            bearish_hits += sum(normalized.count(term) for term in bearish_terms)
+        total_hits = bullish_hits + bearish_hits
+        bullish_ratio = bullish_hits / total_hits if total_hits else 0.5
+        bearish_ratio = bearish_hits / total_hits if total_hits else 0.2
+        neutral_ratio = max(0.0, 1.0 - bullish_ratio - bearish_ratio)
+        sentiment_score = round(max(1.0, min(5.0, 3.0 + (bullish_hits - bearish_hits) * 0.15)), 2)
+        if sentiment_score >= 3.8:
+            mood = "偏多"
+        elif sentiment_score <= 2.4:
+            mood = "偏空"
+        else:
+            mood = "分歧"
+        if total_hits >= 12:
+            consensus = "高"
+        elif total_hits >= 5:
+            consensus = "中"
+        else:
+            consensus = "低"
+        return {
+            "bullish_hits": bullish_hits,
+            "bearish_hits": bearish_hits,
+            "bullish_ratio": round(bullish_ratio, 2),
+            "bearish_ratio": round(bearish_ratio, 2),
+            "neutral_ratio": round(neutral_ratio, 2),
+            "sentiment_score": sentiment_score,
+            "mood": mood,
+            "consensus_level": consensus,
+        }
+
+    def _taoguba_author_meta(self, author_id: Any, author_name: str = "") -> dict[str, Any]:
+        key = str(author_id or "").strip()
+        item = TAOGUBA_VIP_AUTHORS.get(key)
+        if item:
+            return {
+                "author_id": key,
+                "author_name": author_name or str(item.get("name", "")),
+                "author_is_vip": True,
+                "author_tier": str(item.get("tier", "")),
+                "author_fans": int(item.get("fans", 0) or 0),
+                "author_blog_url": str(item.get("blog_url", "")),
+            }
+        return {
+            "author_id": key,
+            "author_name": author_name,
+            "author_is_vip": False,
+            "author_tier": "",
+            "author_fans": 0,
+            "author_blog_url": "",
+        }
+
+    def _extract_taoguba_hot_articles_from_html(
+        self,
+        html_text: str,
+        page_size: int,
+        include_content: bool,
+    ) -> list[dict[str, Any]]:
+        cards: list[dict[str, Any]] = []
+        pattern = re.compile(r'href="(?P<href>/a/[^"]+)"[^>]*title="(?P<title>[^"]+)"', re.DOTALL)
+        seen_urls: set[str] = set()
+        for match in pattern.finditer(html_text):
+            snippet = html_text[match.start() : match.start() + 1200]
+            url = "https://www.tgb.cn" + match.group("href")
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = self._normalize_text(match.group("title"))
+            author_id_match = re.search(r'data-userid="(\d+)"', snippet)
+            author_name_match = re.search(r'class="[^"]*name[^"]*"[^>]*>([^<]+)</a>', snippet)
+            likes_match = re.search(r'(?:点赞|赞)\D{0,4}(\d+)', snippet)
+            replies_match = re.search(r'(?:评论|回复)\D{0,4}(\d+)', snippet)
+            author_name = self._normalize_text(author_name_match.group(1) if author_name_match else "")
+            author_id = author_id_match.group(1) if author_id_match else ""
+            meta = self._taoguba_author_meta(author_id, author_name)
+            item = {
+                "id": match.group("href").strip("/").replace("/", "-"),
+                "title": title,
+                "url": url,
+                "publish_time": "",
+                "likes": int(likes_match.group(1) if likes_match else 0),
+                "replies": int(replies_match.group(1) if replies_match else 0),
+                "reads": 0,
+                "symbols": self._extract_stock_codes(title),
+                "topics": self._extract_taoguba_topics(title),
+                "content": "",
+                **meta,
+            }
+            if include_content:
+                try:
+                    detail_html = self._http_get_text(url, encoding="utf-8")
+                    paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", detail_html, re.DOTALL)
+                    content = " ".join(self._normalize_text(p) for p in paragraphs[:8] if self._normalize_text(p))
+                    item["content"] = content[:600]
+                    if not item["symbols"]:
+                        item["symbols"] = self._extract_stock_codes(content)
+                    if not item["topics"]:
+                        item["topics"] = self._extract_taoguba_topics(content)
+                except Exception:
+                    item["content"] = ""
+            cards.append(item)
+            if len(cards) >= page_size:
+                break
+        return cards
+
+    def _extract_taoguba_coolattr(self, html_text: str) -> list[dict[str, Any]]:
+        match = re.search(r"coolAttr\s*=\s*(\[[\s\S]*?\])\s*;", html_text)
+        if not match:
+            match = re.search(r'"coolAttr"\s*:\s*(\[[\s\S]*?\])\s*[,}]', html_text)
+        if not match:
+            return []
+        raw = match.group(1)
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        return payload if isinstance(payload, list) else []
+
+    def _normalize_taoguba_comment(self, item: dict[str, Any], stock_code: str) -> dict[str, Any]:
+        author_id = str(
+            item.get("userID")
+            or item.get("userId")
+            or item.get("authorId")
+            or item.get("authorID")
+            or ""
+        )
+        author_name = self._normalize_text(
+            str(item.get("userName") or item.get("authorName") or item.get("nickName") or item.get("userNickName") or "")
+        )
+        content = self._normalize_text(
+            str(item.get("content") or item.get("body") or item.get("replyContent") or item.get("text") or "")
+        )
+        meta = self._taoguba_author_meta(author_id, author_name)
+        stance = "neutral"
+        bullish_terms = ("看多", "低吸", "主线", "龙头", "承接", "加强", "走强", "新高", "回流")
+        bearish_terms = ("看空", "退潮", "走弱", "跌破", "减仓", "兑现", "风险", "补跌")
+        if any(term in content for term in bullish_terms):
+            stance = "bullish"
+        elif any(term in content for term in bearish_terms):
+            stance = "bearish"
+        sentiment = self._score_sentiment_texts([content])
+        if stance == "neutral" and sentiment["sentiment_score"] >= 3.7:
+            stance = "bullish"
+        elif stance == "neutral" and sentiment["sentiment_score"] <= 2.4:
+            stance = "bearish"
+        return {
+            "comment_id": str(item.get("id") or item.get("commentId") or item.get("replyId") or ""),
+            "stock_code": stock_code,
+            "publish_time": str(item.get("createTime") or item.get("ctime") or item.get("time") or ""),
+            "content": content,
+            "likes": int(self._to_float(item.get("likes") or item.get("praiseCount") or item.get("up"), 0.0)),
+            "replies": int(self._to_float(item.get("replyNum") or item.get("replyCount") or item.get("comments"), 0.0)),
+            "stance": stance,
+            **meta,
+        }
 
     def _fetch_quote_map(self, codes: list[str]) -> dict[str, list[str]]:
         symbols = [self._resolve_symbol(code) for code in codes]
@@ -1671,3 +1861,145 @@ class TencentLiveProvider(MarketDataProvider):
         if payload.get("status_code", 0) != 0:
             raise OnlineDataError(payload.get("status_msg", "iwencai query failed"))
         return payload.get("datas") or []
+
+    def get_taoguba_hot_articles(
+        self,
+        page_size: int = 10,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        html_text = self._http_get_text("https://www.tgb.cn/dianzan", encoding="utf-8")
+        items = self._extract_taoguba_hot_articles_from_html(html_text, page_size, include_content)
+        if items:
+            return items
+        raise OnlineDataError("taoguba hot article parsing returned empty data")
+
+    def get_taoguba_market_sentiment(self, page_size: int = 20) -> dict[str, Any]:
+        articles = self.get_taoguba_hot_articles(page_size=page_size, include_content=True)
+        texts = [f"{item.get('title', '')} {item.get('content', '')}" for item in articles]
+        sentiment = self._score_sentiment_texts(texts)
+        topic_stats: dict[str, dict[str, Any]] = {}
+        vip_focus: list[str] = []
+        for item in articles:
+            topics = item.get("topics") or []
+            article_text = f"{item.get('title', '')} {item.get('content', '')}"
+            article_sentiment = self._score_sentiment_texts([article_text])
+            if item.get("author_is_vip"):
+                vip_focus.extend(topics)
+            for topic in topics:
+                bucket = topic_stats.setdefault(topic, {"topic": topic, "mentions": 0, "bullish_score": 0.0})
+                bucket["mentions"] += 1
+                bucket["bullish_score"] += article_sentiment["bullish_ratio"]
+        hot_topics = [
+            {
+                "topic": topic,
+                "mentions": data["mentions"],
+                "bullish_ratio": round(data["bullish_score"] / max(data["mentions"], 1), 2),
+            }
+            for topic, data in sorted(topic_stats.items(), key=lambda item: item[1]["mentions"], reverse=True)
+        ]
+        heat_score = round(min(5.0, len(articles) / 4 + len(hot_topics) * 0.25), 2)
+        unique_vip_focus = []
+        for item in vip_focus:
+            if item not in unique_vip_focus:
+                unique_vip_focus.append(item)
+        return {
+            "forum": "taoguba",
+            **sentiment,
+            "heat_score": heat_score,
+            "sample_size": len(articles),
+            "hot_topics": hot_topics[:8],
+            "vip_focus": unique_vip_focus[:8],
+            "articles": articles,
+        }
+
+    def get_taoguba_stock_comments(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> list[dict[str, Any]]:
+        symbol = self._resolve_symbol(stock_code)
+        html_text = self._http_get_text(f"https://www.tgb.cn/quotes/{symbol}", encoding="utf-8")
+        payload = self._extract_taoguba_coolattr(html_text)
+        if not payload:
+            return []
+        comments = [self._normalize_taoguba_comment(item, stock_code) for item in payload if isinstance(item, dict)]
+        comments = [item for item in comments if item.get("content")]
+        return comments[:page_size]
+
+    def get_taoguba_stock_sentiment(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> dict[str, Any]:
+        stock_name = ""
+        try:
+            stock_name = self.get_stock_snapshot(stock_code).name
+        except Exception:
+            stock_name = ""
+        comments = self.get_taoguba_stock_comments(stock_code, page_size)
+        texts = [item.get("content", "") for item in comments]
+        sentiment = self._score_sentiment_texts(texts)
+        vip_views = self.get_taoguba_vip_views(stock_code, min(page_size, 8))
+        key_phrases: list[str] = []
+        for text in texts:
+            for phrase in self._extract_taoguba_topics(text):
+                if phrase not in key_phrases:
+                    key_phrases.append(phrase)
+        return {
+            "forum": "taoguba",
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            **sentiment,
+            "comment_count": len(comments),
+            "vip_comment_count": len([item for item in comments if item.get("author_is_vip")]),
+            "key_phrases": key_phrases[:10],
+            "vip_views": vip_views,
+            "comments": comments,
+        }
+
+    def get_taoguba_vip_views(
+        self,
+        stock_code: str | None = None,
+        page_size: int = 10,
+    ) -> list[dict[str, Any]]:
+        articles = self.get_taoguba_hot_articles(page_size=max(page_size * 2, 10), include_content=True)
+        target_code = str(stock_code or "")
+        items: list[dict[str, Any]] = []
+        for article in articles:
+            if not article.get("author_is_vip"):
+                continue
+            content = article.get("content", "")
+            symbols = article.get("symbols") or self._extract_stock_codes(content)
+            if target_code and target_code not in symbols and target_code not in article.get("title", ""):
+                continue
+            sentiment = self._score_sentiment_texts([f"{article.get('title', '')} {content}"])
+            stance = "neutral"
+            if sentiment["sentiment_score"] >= 3.7:
+                stance = "bullish"
+            elif sentiment["sentiment_score"] <= 2.4:
+                stance = "bearish"
+            items.append(
+                {
+                    "author_id": article.get("author_id", ""),
+                    "author_name": article.get("author_name", ""),
+                    "tier": article.get("author_tier", ""),
+                    "fans": article.get("author_fans", 0),
+                    "stance": stance,
+                    "publish_time": article.get("publish_time", ""),
+                    "stock_code": symbols[0] if symbols else target_code,
+                    "stock_name": "",
+                    "title": article.get("title", ""),
+                    "summary": content[:220] if content else article.get("title", ""),
+                    "url": article.get("url", ""),
+                }
+            )
+            if len(items) >= page_size:
+                break
+        if target_code and items:
+            try:
+                snapshot = self.get_stock_snapshot(target_code)
+                for item in items:
+                    item["stock_name"] = snapshot.name
+            except Exception:
+                pass
+        return items[:page_size]

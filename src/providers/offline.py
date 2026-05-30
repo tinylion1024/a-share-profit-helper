@@ -10,6 +10,7 @@ from src.config import Config
 from src.models import MarketSnapshot, StockSnapshot
 from src.providers.base import DataNotFoundError, MarketDataProvider
 from src.providers.default_data import DEFAULT_MARKET, DEFAULT_STOCKS
+from src.providers.taoguba_authors import TAOGUBA_VIP_AUTHORS
 
 
 class OfflineFirstProvider(MarketDataProvider):
@@ -603,3 +604,214 @@ class OfflineFirstProvider(MarketDataProvider):
         return [
             {"query": query, "股票代码": "300750", "股票简称": "宁德时代", "ROE": 24.8, "page": page}
         ][:limit]
+
+    def get_taoguba_hot_articles(
+        self,
+        page_size: int = 10,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        items = [
+            {
+                "id": "offline-tgb-1",
+                "title": "机器人主线分歧后的承接观察",
+                "author_id": "134434",
+                "author_name": "炒股养家",
+                "author_is_vip": True,
+                "author_tier": "S级",
+                "publish_time": f"{self._market.date} 09:12:00",
+                "likes": 2680,
+                "replies": 192,
+                "reads": 185000,
+                "symbols": ["300750", "300308"],
+                "topics": ["机器人", "算力", "主线"],
+                "url": "https://www.tgb.cn/a/offline-tgb-1",
+                "content": "市场主线仍围绕机器人与算力，分歧后的承接质量决定是否继续加速。" if include_content else "",
+            },
+            {
+                "id": "offline-tgb-2",
+                "title": "储能方向回流，低吸看谁更有辨识度",
+                "author_id": "252069",
+                "author_name": "柏拉爱空",
+                "author_is_vip": True,
+                "author_tier": "A级",
+                "publish_time": f"{self._market.date} 11:05:00",
+                "likes": 1730,
+                "replies": 121,
+                "reads": 132000,
+                "symbols": ["300750", "002594"],
+                "topics": ["储能", "低吸", "趋势"],
+                "url": "https://www.tgb.cn/a/offline-tgb-2",
+                "content": "储能更偏趋势中军博弈，适合分歧承接而不是一致追高。" if include_content else "",
+            },
+            {
+                "id": "offline-tgb-3",
+                "title": "退潮期不要乱开仓，等情绪回暖再做主升",
+                "author_id": "7105646",
+                "author_name": "朱雀路作手",
+                "author_is_vip": True,
+                "author_tier": "B级",
+                "publish_time": f"{self._market.date} 14:26:00",
+                "likes": 980,
+                "replies": 84,
+                "reads": 93000,
+                "symbols": ["000001"],
+                "topics": ["退潮", "情绪", "仓位"],
+                "url": "https://www.tgb.cn/a/offline-tgb-3",
+                "content": "退潮期更看重仓位纪律，耐心等待下一轮主线确认。" if include_content else "",
+            },
+        ]
+        return items[:page_size]
+
+    def get_taoguba_market_sentiment(self, page_size: int = 20) -> dict[str, Any]:
+        articles = self.get_taoguba_hot_articles(page_size=page_size, include_content=True)
+        return {
+            "forum": "taoguba",
+            "bullish_ratio": 0.62,
+            "bearish_ratio": 0.18,
+            "neutral_ratio": 0.2,
+            "sentiment_score": 3.9,
+            "mood": "偏多",
+            "heat_score": 4.2,
+            "consensus_level": "中高",
+            "hot_topics": [
+                {"topic": "机器人", "mentions": 12, "bullish_ratio": 0.75},
+                {"topic": "储能", "mentions": 9, "bullish_ratio": 0.67},
+                {"topic": "情绪周期", "mentions": 6, "bullish_ratio": 0.52},
+            ],
+            "vip_focus": ["机器人", "储能", "仓位纪律"],
+            "sample_size": len(articles),
+            "articles": articles,
+        }
+
+    def get_taoguba_stock_comments(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> list[dict[str, Any]]:
+        stock = self.get_stock_snapshot(stock_code)
+        comments = [
+            {
+                "comment_id": f"{stock_code}-c1",
+                "author_id": "134434",
+                "author_name": "炒股养家",
+                "author_is_vip": True,
+                "author_tier": "S级",
+                "publish_time": f"{self._market.date} 09:43:00",
+                "stance": "bullish",
+                "likes": 328,
+                "replies": 18,
+                "content": f"{stock.name} 作为主线核心，分歧不破位仍可看作低吸机会。",
+            },
+            {
+                "comment_id": f"{stock_code}-c2",
+                "author_id": "11808691",
+                "author_name": "大曾子",
+                "author_is_vip": True,
+                "author_tier": "A级",
+                "publish_time": f"{self._market.date} 10:18:00",
+                "stance": "neutral",
+                "likes": 196,
+                "replies": 12,
+                "content": f"{stock.name} 更像趋势中军，适合等回踩承接确认，不适合情绪一致时追高。",
+            },
+            {
+                "comment_id": f"{stock_code}-c3",
+                "author_id": "user-1",
+                "author_name": "短线观察员",
+                "author_is_vip": False,
+                "author_tier": "",
+                "publish_time": f"{self._market.date} 13:11:00",
+                "stance": "bearish",
+                "likes": 45,
+                "replies": 9,
+                "content": f"{stock.name} 午后如果跌破均线，情绪可能转弱。",
+            },
+            {
+                "comment_id": f"{stock_code}-c4",
+                "author_id": "user-2",
+                "author_name": "市场情绪派",
+                "author_is_vip": False,
+                "author_tier": "",
+                "publish_time": f"{self._market.date} 14:36:00",
+                "stance": "bullish",
+                "likes": 61,
+                "replies": 7,
+                "content": f"{stock.name} 只要主线没切换，回封预期还在。",
+            },
+        ]
+        return comments[:page_size]
+
+    def get_taoguba_stock_sentiment(
+        self,
+        stock_code: str,
+        page_size: int = 30,
+    ) -> dict[str, Any]:
+        stock = self.get_stock_snapshot(stock_code)
+        comments = self.get_taoguba_stock_comments(stock_code, page_size)
+        vip_views = self.get_taoguba_vip_views(stock_code, min(page_size, 5))
+        return {
+            "forum": "taoguba",
+            "stock_code": stock_code,
+            "stock_name": stock.name,
+            "sentiment_score": 3.8,
+            "mood": "偏多",
+            "bullish_ratio": 0.58,
+            "bearish_ratio": 0.17,
+            "neutral_ratio": 0.25,
+            "consensus_level": "中等",
+            "comment_count": len(comments),
+            "vip_comment_count": len([item for item in comments if item.get("author_is_vip")]),
+            "key_phrases": ["主线核心", "趋势中军", "分歧低吸", "均线承接"],
+            "vip_views": vip_views,
+            "comments": comments,
+        }
+
+    def get_taoguba_vip_views(
+        self,
+        stock_code: str | None = None,
+        page_size: int = 10,
+    ) -> list[dict[str, Any]]:
+        target_code = stock_code or "300750"
+        stock = self.get_stock_snapshot(target_code)
+        views = [
+            {
+                "author_id": "134434",
+                "author_name": "炒股养家",
+                "tier": TAOGUBA_VIP_AUTHORS["134434"]["tier"],
+                "fans": TAOGUBA_VIP_AUTHORS["134434"]["fans"],
+                "stance": "bullish",
+                "publish_time": f"{self._market.date} 09:43:00",
+                "stock_code": stock.code,
+                "stock_name": stock.name,
+                "title": f"{stock.name} 分歧承接观察",
+                "summary": f"{stock.name} 如果维持主线辨识度，分歧仍可低吸，但不能破位。",
+                "url": "https://www.tgb.cn/a/offline-vip-1",
+            },
+            {
+                "author_id": "252069",
+                "author_name": "柏拉爱空",
+                "tier": TAOGUBA_VIP_AUTHORS["252069"]["tier"],
+                "fans": TAOGUBA_VIP_AUTHORS["252069"]["fans"],
+                "stance": "neutral",
+                "publish_time": f"{self._market.date} 11:05:00",
+                "stock_code": stock.code,
+                "stock_name": stock.name,
+                "title": f"{stock.name} 趋势中军节奏",
+                "summary": "适合趋势低吸，不适合一致追高，观察资金承接持续性。",
+                "url": "https://www.tgb.cn/a/offline-vip-2",
+            },
+            {
+                "author_id": "7105646",
+                "author_name": "朱雀路作手",
+                "tier": TAOGUBA_VIP_AUTHORS["7105646"]["tier"],
+                "fans": TAOGUBA_VIP_AUTHORS["7105646"]["fans"],
+                "stance": "bearish",
+                "publish_time": f"{self._market.date} 14:26:00",
+                "stock_code": stock.code,
+                "stock_name": stock.name,
+                "title": f"{stock.name} 情绪转弱风险",
+                "summary": "若板块回流不及预期，应优先减仓保护利润。",
+                "url": "https://www.tgb.cn/a/offline-vip-3",
+            },
+        ]
+        return views[:page_size]

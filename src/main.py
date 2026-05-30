@@ -35,13 +35,31 @@ from src.cli import (
     render_sector_rankings,
     render_stock_info,
     render_stock_picker,
+    render_taoguba_hot,
+    render_taoguba_sentiment,
+    render_taoguba_stock,
+    render_taoguba_vip,
     render_theme_research,
     render_trading_plan,
     render_transactions,
+    render_user_memory,
+    render_user_profile,
     render_valuation,
 )
 from src.skill import ASharesSkill
 from src.utils.time import shanghai_today_str
+
+
+def _optional_list(values: list[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    items: list[str] = []
+    for raw in values:
+        for item in str(raw).split(","):
+            token = item.strip()
+            if token and token not in items:
+                items.append(token)
+    return items
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +67,26 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("self-check", help="检查 Skill 是否可运行")
+    subparsers.add_parser("profile-show", help="查看用户偏好和记忆摘要")
+
+    profile_set = subparsers.add_parser("profile-set", help="设置用户偏好")
+    profile_set.add_argument("--risk-preference", help="风险偏好")
+    profile_set.add_argument("--default-horizon", help="默认周期")
+    profile_set.add_argument("--preferred-sectors", nargs="+", help="偏好板块，支持逗号分隔")
+    profile_set.add_argument("--avoided-sectors", nargs="+", help="回避板块，支持逗号分隔")
+    profile_set.add_argument("--watchlist", nargs="+", help="自选股票代码/简称，支持逗号分隔")
+    profile_set.add_argument("--focus-styles", nargs="+", help="偏好风格，支持逗号分隔")
+    profile_set.add_argument("--notes", nargs="+", help="用户备注，支持逗号分隔")
+
+    memory_show = subparsers.add_parser("memory-show", help="查看用户记忆")
+    memory_show.add_argument("--code", help="股票代码或简称")
+
+    memory_note = subparsers.add_parser("memory-note", help="记录股票笔记")
+    memory_note.add_argument("--code", required=True, help="股票代码或简称")
+    memory_note.add_argument("--note", required=True, help="记忆内容")
+
+    memory_clear = subparsers.add_parser("memory-clear", help="清理用户记忆")
+    memory_clear.add_argument("--code", help="仅清理某只股票的记忆")
 
     risk = subparsers.add_parser("risk", help="风险扫描")
     risk.add_argument("--code", required=True, help="股票代码或简称")
@@ -57,8 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose = subparsers.add_parser("diagnose", help="诊股")
     diagnose.add_argument("--code", required=True, help="股票代码或简称")
     diagnose.add_argument("--scenario", default="诊股", help="场景名称")
-    diagnose.add_argument("--horizon", default="短线", help="持仓周期")
-    diagnose.add_argument("--risk-preference", default="平衡型", help="风险偏好")
+    diagnose.add_argument("--horizon", help="持仓周期")
+    diagnose.add_argument("--risk-preference", help="风险偏好")
     diagnose.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     pick = subparsers.add_parser("pick", help="选股")
@@ -106,6 +144,21 @@ def build_parser() -> argparse.ArgumentParser:
     hot_stocks = subparsers.add_parser("hot-stocks", help="同花顺热点强势股")
     hot_stocks.add_argument("--date", help="观察日 (YYYY-MM-DD)")
     hot_stocks.add_argument("--page-size", type=int, default=20, help="返回条数")
+
+    taoguba_hot = subparsers.add_parser("taoguba-hot", help="淘股吧点赞榜热点")
+    taoguba_hot.add_argument("--page-size", type=int, default=10, help="返回条数")
+    taoguba_hot.add_argument("--include-content", action="store_true", help="抓取正文摘要")
+
+    taoguba_sentiment = subparsers.add_parser("taoguba-sentiment", help="淘股吧市场舆情")
+    taoguba_sentiment.add_argument("--page-size", type=int, default=20, help="样本文章数")
+
+    taoguba_stock = subparsers.add_parser("taoguba-stock", help="淘股吧个股情绪")
+    taoguba_stock.add_argument("--code", required=True, help="股票代码或简称")
+    taoguba_stock.add_argument("--page-size", type=int, default=30, help="评论条数")
+
+    taoguba_vip = subparsers.add_parser("taoguba-vip", help="淘股吧大V观点")
+    taoguba_vip.add_argument("--code", help="股票代码或简称")
+    taoguba_vip.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     concept_blocks = subparsers.add_parser("concept-blocks", help="概念板块归属")
     concept_blocks.add_argument("--code", required=True, help="股票代码或简称")
@@ -214,8 +267,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _apply_runtime_defaults(args: argparse.Namespace) -> argparse.Namespace:
     today = shanghai_today_str()
+    args.date_inferred = False
     if args.command in {"pre-market", "post-market", "market-cycle", "plan", "playbook", "dragon-tiger", "daily-dragon-tiger", "lockup", "quick-research"} and not getattr(args, "date", None):
         args.date = today
+        args.date_inferred = True
     return args
 
 
@@ -227,6 +282,39 @@ def main() -> None:
     if args.command == "self-check":
         payload = skill.self_check()
         print(render_json(payload) if args.format == "json" else render_json(payload))
+        return
+
+    if args.command == "profile-show":
+        payload = skill.user_profile()
+        print(render_json(payload) if args.format == "json" else render_user_profile(payload))
+        return
+
+    if args.command == "profile-set":
+        payload = skill.update_user_profile(
+            risk_preference=args.risk_preference,
+            default_horizon=args.default_horizon,
+            preferred_sectors=_optional_list(args.preferred_sectors),
+            avoided_sectors=_optional_list(args.avoided_sectors),
+            watchlist=_optional_list(args.watchlist),
+            focus_styles=_optional_list(args.focus_styles),
+            notes=_optional_list(args.notes),
+        )
+        print(render_json(payload) if args.format == "json" else render_user_profile({**payload, "memory": skill.user_profile().get("memory", {})}))
+        return
+
+    if args.command == "memory-show":
+        payload = skill.user_memory(args.code)
+        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
+        return
+
+    if args.command == "memory-note":
+        payload = skill.add_memory_note(args.code, args.note)
+        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
+        return
+
+    if args.command == "memory-clear":
+        payload = skill.clear_memory(args.code)
+        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
         return
 
     if args.command == "risk":
@@ -246,17 +334,17 @@ def main() -> None:
         return
 
     if args.command == "pre-market":
-        payload = skill.pre_market_report(args.date)
+        payload = skill.pre_market_report(None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_pre_market(payload))
         return
 
     if args.command == "post-market":
-        payload = skill.post_market_review(args.date)
+        payload = skill.post_market_review(None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_post_market(payload))
         return
 
     if args.command == "market-cycle":
-        payload = skill.market_cycle_report(args.date)
+        payload = skill.market_cycle_report(None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_market_cycle(payload))
         return
 
@@ -266,7 +354,7 @@ def main() -> None:
         return
 
     if args.command == "playbook":
-        payload = skill.strategy_playbook(args.code, args.date)
+        payload = skill.strategy_playbook(args.code, None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_playbook(payload))
         return
 
@@ -303,6 +391,26 @@ def main() -> None:
     if args.command == "hot-stocks":
         payload = skill.hot_stocks(args.date, args.page_size)
         print(render_json(payload) if args.format == "json" else render_hot_stocks(payload))
+        return
+
+    if args.command == "taoguba-hot":
+        payload = skill.taoguba_hot(args.page_size, args.include_content)
+        print(render_json(payload) if args.format == "json" else render_taoguba_hot(payload))
+        return
+
+    if args.command == "taoguba-sentiment":
+        payload = skill.taoguba_market_sentiment(args.page_size)
+        print(render_json(payload) if args.format == "json" else render_taoguba_sentiment(payload))
+        return
+
+    if args.command == "taoguba-stock":
+        payload = skill.taoguba_stock_sentiment(args.code, args.page_size)
+        print(render_json(payload) if args.format == "json" else render_taoguba_stock(payload))
+        return
+
+    if args.command == "taoguba-vip":
+        payload = skill.taoguba_vip_views(args.code, args.page_size)
+        print(render_json(payload) if args.format == "json" else render_taoguba_vip(payload))
         return
 
     if args.command == "concept-blocks":
@@ -381,7 +489,7 @@ def main() -> None:
         return
 
     if args.command == "quick-research":
-        payload = skill.quick_research(args.code, args.date)
+        payload = skill.quick_research(args.code, None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_quick_research(payload))
         return
 

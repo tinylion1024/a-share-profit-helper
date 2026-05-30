@@ -65,6 +65,41 @@ class IntegratedAnalyzer:
             "overseas_signal": snapshot.overseas_signal,
         }
 
+    def analyze_community_sentiment(self, page_size: int = 12) -> dict:
+        try:
+            payload = self.provider.get_taoguba_market_sentiment(page_size)
+        except Exception as exc:
+            return {
+                "available": False,
+                "error": str(exc),
+                "forum": "taoguba",
+                "sentiment_score": None,
+                "mood": "未知",
+                "hot_topics": [],
+                "vip_focus": [],
+            }
+        payload = dict(payload)
+        payload["available"] = True
+        return payload
+
+    def analyze_stock_community(self, stock_code: str, page_size: int = 20) -> dict:
+        try:
+            payload = self.provider.get_taoguba_stock_sentiment(stock_code, page_size)
+        except Exception as exc:
+            return {
+                "available": False,
+                "error": str(exc),
+                "forum": "taoguba",
+                "stock_code": stock_code,
+                "sentiment_score": None,
+                "mood": "未知",
+                "vip_views": [],
+                "comments": [],
+            }
+        payload = dict(payload)
+        payload["available"] = True
+        return payload
+
     def analyze_liquidity_pattern(self, date: str | None = None) -> dict:
         snapshot = self.provider.get_market_snapshot(date)
         mode = self.detect_market_mode(snapshot.total_volume_billion)
@@ -141,6 +176,7 @@ class IntegratedAnalyzer:
         market = self.provider.get_market_snapshot(date)
         news = self.analyze_news_policy(date=date)
         sentiment = self.analyze_sentiment(date=date)
+        community = self.analyze_stock_community(stock_code)
         liquidity = self.analyze_liquidity_pattern(date=date)
         strategy_profile = self.methodology.evaluate_stock(stock, market)
         discipline = self.methodology.build_discipline(stock, market)
@@ -149,6 +185,7 @@ class IntegratedAnalyzer:
             "market": market.to_dict(),
             "news": news,
             "sentiment": sentiment,
+            "community": community,
             "liquidity": liquidity,
             "methodology": strategy_profile.to_dict(),
             "discipline": discipline,

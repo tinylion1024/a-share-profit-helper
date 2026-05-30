@@ -68,6 +68,7 @@ class AnalysisPipeline:
         return {
             "news": analysis["news"],
             "sentiment": analysis["sentiment"],
+            "community": analysis["community"],
             "technical": analysis["technical"],
             "methodology": analysis["methodology"],
             "discipline": analysis["discipline"],
@@ -83,6 +84,7 @@ class AnalysisPipeline:
         risk = context["risk"]
         methodology = context["market_3d"]["methodology"]
         discipline = context["market_3d"]["discipline"]
+        community = context["market_3d"].get("community", {})
         entry_price = round(min(stock.price, stock.resistance * 0.99), 2)
         stop_loss = round(min(stock.support, entry_price * (1 - self.config.stop_loss_ratio)), 2)
         target_price = round(
@@ -113,9 +115,21 @@ class AnalysisPipeline:
             action = "观望"
             confidence = "中"
 
+        community_score = community.get("sentiment_score")
+        community_mood = community.get("mood", "未知")
+        if isinstance(community_score, (int, float)):
+            if community_score <= 2.4 and action == "可以买":
+                action = "小仓试错"
+                confidence = "中"
+                position_ratio = min(position_ratio, 0.15)
+            elif community_score >= 3.9 and action in {"观望", "小仓试错"} and rating["is_recommended"]:
+                action = "小仓试错" if action == "观望" else action
+                confidence = "中高" if confidence == "中" else confidence
+
         summary = (
             f"{stock.name} 处于{methodology['market_stage']}，更适合{methodology['setup']}，"
             f"定位为{methodology['style']}。四维评级 {rating['level']}，风险等级 {risk['risk_level']}。"
+            f"社区情绪 {community_mood}。"
         )
         return {
             "action": action,
@@ -127,6 +141,11 @@ class AnalysisPipeline:
             "market_stage": methodology["market_stage"],
             "style": methodology["style"],
             "setup": methodology["setup"],
+            "community_sentiment": {
+                "score": community_score,
+                "mood": community_mood,
+                "vip_view_count": len(community.get("vip_views", [])),
+            },
             "discipline": discipline,
             "summary": summary,
         }
