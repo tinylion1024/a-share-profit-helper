@@ -114,6 +114,30 @@ python3 scripts/run_skill.py --format json risk --code 300750
 - `scripts/run_tests.sh`
   Runs `pytest` when available, otherwise falls back to `unittest`.
 
+## Natural Language Routing
+
+- In OpenClaw, do not ask the user to type shell commands. The user should speak in natural language and the agent should run the matching command internally.
+- Treat Chinese stock short names and six-digit stock codes as equivalent inputs for stock-specific workflows. If the user says `宁德时代能买吗`, `比亚迪今天怎么看`, or `查一下贵州茅台的 F10`, pass the short name directly and let the skill resolve it to a stock code.
+- If the user asks a broad question with no command words, route by intent rather than by literal keyword matching.
+- If a request mixes market view plus single-stock execution, run the market workflow first, then the stock workflow, and summarize them together.
+
+Examples:
+
+- `今天市场情绪怎么样，适合进攻还是防守？`
+  Run `market-cycle`.
+- `宁德时代能买吗？给我买卖建议。`
+  Run `diagnose`, and use `playbook` if the user also wants entry/add/reduce/exit rules.
+- `帮我看一下比亚迪风险大不大。`
+  Run `risk`.
+- `今天有哪些值得看的票？`
+  Run `pick`, optionally followed by `hot-stocks` or `sectors` when the user asks for why they are strong.
+- `查一下宁德时代最近公告、资金流和研报。`
+  Run `announcements`, `fund-flow`, and `reports`.
+- `机器人主题最近有什么研报和标的？`
+  Run `theme-research`.
+- `帮我快速研究一下寒武纪。`
+  Run `quick-research`.
+
 ## Procedure
 
 1. Run `python3 scripts/run_skill.py self-check` before using live scenarios.

@@ -122,6 +122,25 @@ class SkillCompatibilityTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["stock_code"], "300750")
 
+    def test_run_skill_cli_accepts_stock_name(self) -> None:
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "A_SHARE_SKILL_OFFLINE_MODE": "true",
+        }
+        result = subprocess.run(
+            [sys.executable, "scripts/run_skill.py", "--format", "json", "risk", "--code", "宁德时代"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["stock_code"], "300750")
+        self.assertEqual(payload["stock_query"], "宁德时代")
+        self.assertEqual(payload["resolved_by"], "name_exact")
+
     def test_module_entrypoint_outputs_json(self) -> None:
         env = {
             **os.environ,
@@ -203,6 +222,18 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertTrue(skill.consensus_eps("300750")["items"])
         self.assertTrue(skill.iwencai_search("机器人", "report", 2)["items"])
         self.assertTrue(skill.iwencai_query("宁德时代 ROE", 1, 2)["items"])
+
+    def test_stock_workflows_accept_stock_name_in_offline_mode(self) -> None:
+        skill = ASharesSkill(config=make_offline_config())
+        diagnosis = skill.diagnose("宁德时代", date="2026-05-28")
+        valuation = skill.valuation("宁德时代")
+        research = skill.quick_research("宁德时代", "2026-05-28")
+        self.assertEqual(diagnosis["stock_code"], "300750")
+        self.assertEqual(diagnosis["stock_query"], "宁德时代")
+        self.assertEqual(valuation["stock_code"], "300750")
+        self.assertEqual(valuation["stock_query"], "宁德时代")
+        self.assertEqual(research["stock_code"], "300750")
+        self.assertEqual(research["stock_query"], "宁德时代")
 
     def test_run_skill_cli_supports_news_command(self) -> None:
         env = {
@@ -615,6 +646,9 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(metadata["hermes"]["category"], "research")
         self.assertIn("stocks", metadata["hermes"]["tags"])
         self.assertIn("## Verification", text)
+        self.assertIn("## Natural Language Routing", text)
+        self.assertIn("do not ask the user to type shell commands", text)
+        self.assertIn("宁德时代能买吗", text)
 
     def test_pyproject_declares_console_script_and_dev_extra(self) -> None:
         text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -639,6 +673,7 @@ class SkillCompatibilityTests(unittest.TestCase):
                 "## Prerequisites",
                 "## How To Run",
                 "## Quick Reference",
+                "## Natural Language Routing",
                 "## Procedure",
                 "## Pitfalls",
                 "## Verification",
@@ -725,6 +760,21 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(snapshot.data_source, "live-tencent-finance")
         self.assertGreater(snapshot.ma20, 0)
         self.assertGreater(snapshot.turnover_million, 0)
+
+    def test_live_provider_resolves_stock_name(self) -> None:
+        provider = TencentLiveProvider(Config())
+        with patch.object(
+            provider,
+            "_fetch_all_a_share_rows",
+            return_value=[
+                {"f12": "300750", "f14": "宁德时代"},
+                {"f12": "002594", "f14": "比亚迪"},
+            ],
+        ):
+            resolved = provider.resolve_stock_identifier("宁德时代")
+        self.assertEqual(resolved["code"], "300750")
+        self.assertEqual(resolved["name"], "宁德时代")
+        self.assertEqual(resolved["matched_by"], "name_exact")
 
     def test_live_provider_wraps_network_errors_with_online_data_error(self) -> None:
         provider = TencentLiveProvider(Config())

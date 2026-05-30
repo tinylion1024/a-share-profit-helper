@@ -89,6 +89,23 @@ class ASharesSkill:
         payload.update({"available": True, "data": data})
         return payload
 
+    def _resolve_stock_input(self, stock_identifier: str) -> dict[str, str]:
+        return self.provider.resolve_stock_identifier(stock_identifier)
+
+    def _resolved_stock_meta(self, resolved: dict[str, str]) -> dict:
+        payload = {
+            "stock_code": resolved["code"],
+            "resolved_by": resolved.get("matched_by", ""),
+        }
+        if resolved.get("name"):
+            payload["stock_name"] = resolved["name"]
+        if resolved.get("query") and resolved["query"] != resolved["code"]:
+            payload["stock_query"] = resolved["query"]
+        return payload
+
+    def _resolve_stock_inputs(self, stock_identifiers: list[str]) -> list[dict[str, str]]:
+        return [self._resolve_stock_input(item) for item in stock_identifiers]
+
     def diagnose(
         self,
         stock_code: str,
@@ -97,6 +114,8 @@ class ASharesSkill:
         risk_preference: str = "平衡型",
         date: str | None = None,
     ) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         payload = self.pipeline.run_standard_flow(
             stock_code=stock_code,
             scenario=scenario,
@@ -109,11 +128,15 @@ class ASharesSkill:
             "trade_setup": self.analyzer.evaluate_trade_setup(stock_code, date),
             "discipline": self.analyzer.build_trade_discipline(stock_code, date),
         }
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def risk(self, stock_code: str, date: str | None = None) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         payload = self.risk_checker.check(stock_code, date).to_dict()
         payload["strategy_discipline"] = self.analyzer.build_trade_discipline(stock_code, date)
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def pick(self, filter_names: list[str]) -> list[dict]:
@@ -126,7 +149,10 @@ class ASharesSkill:
         return self.post_market.generate_review(date).to_dict()
 
     def trading_plan_report(self, stock_code: str, date: str) -> dict:
-        return self.trading_plan.generate_plan(stock_code, date).to_dict()
+        resolved = self._resolve_stock_input(stock_code)
+        payload = self.trading_plan.generate_plan(resolved["code"], date).to_dict()
+        payload.update(self._resolved_stock_meta(resolved))
+        return payload
 
     def market_cycle_report(self, date: str | None = None) -> dict:
         observe_date = date or shanghai_today_str()
@@ -157,8 +183,13 @@ class ASharesSkill:
 
     def strategy_playbook(self, stock_code: str, date: str | None = None) -> dict:
         observe_date = date or shanghai_today_str()
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         playbook = self.analyzer.build_stock_playbook(stock_code, observe_date)
-        payload = self._workflow_meta("playbook", {"stock_code": stock_code, "date": observe_date})
+        payload = self._workflow_meta(
+            "playbook",
+            {"stock_code": stock_code, "stock_query": resolved["query"], "date": observe_date},
+        )
         payload.update(
             {
                 "stock_code": stock_code,
@@ -173,12 +204,15 @@ class ASharesSkill:
                 },
             }
         )
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def stock_news(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_stock_news(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def market_telegraph(self, page_size: int = 20) -> dict:
@@ -194,12 +228,16 @@ class ASharesSkill:
         )
 
     def announcements(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_announcements(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def fund_flow(self, stock_code: str, period: str = "minute", limit: int = 120) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             if period == "minute":
                 items = self.provider.get_fund_flow_minute(stock_code)
@@ -212,6 +250,7 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "count": 0,
                 "total_main_net": 0.0,
                 "latest": None,
@@ -223,6 +262,7 @@ class ASharesSkill:
             "period": period,
             "provider": self.provider.source_name,
             "available": True,
+            **self._resolved_stock_meta(resolved),
             "count": len(items),
             "total_main_net": total_main,
             "latest": items[-1] if items else None,
@@ -242,25 +282,38 @@ class ASharesSkill:
         )
 
     def concept_blocks(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_dict_payload(
             lambda: self.provider.get_concept_blocks(stock_code),
-            {"stock_code": stock_code, "provider": self.provider.source_name, "industry": [], "concept": [], "region": [], "concept_tags": []},
+            {
+                "provider": self.provider.source_name,
+                **self._resolved_stock_meta(resolved),
+                "industry": [],
+                "concept": [],
+                "region": [],
+                "concept_tags": [],
+            },
         )
 
     def research_reports(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_research_reports(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def dragon_tiger(self, stock_code: str, trade_date: str, look_back: int = 30) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_dict_payload(
             lambda: self.provider.get_dragon_tiger_board(stock_code, trade_date, look_back),
             {
-                "stock_code": stock_code,
                 "date": trade_date,
                 "look_back": look_back,
                 "provider": self.provider.source_name,
+                **self._resolved_stock_meta(resolved),
                 "records": [],
                 "buy_top5": [],
                 "sell_top5": [],
@@ -275,33 +328,49 @@ class ASharesSkill:
         )
 
     def margin_trading(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_margin_trading(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def block_trades(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_block_trades(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def holder_numbers(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_holder_numbers(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def dividend_history(self, stock_code: str, page_size: int = 10) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_list_payload(
             lambda: self.provider.get_dividend_history(stock_code, page_size),
-            {"stock_code": stock_code, "provider": self.provider.source_name},
+            {"provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def lockup_expiry(self, stock_code: str, trade_date: str, forward_days: int = 90) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_dict_payload(
             lambda: self.provider.get_lockup_expiry(stock_code, trade_date, forward_days),
-            {"stock_code": stock_code, "date": trade_date, "provider": self.provider.source_name, "history": [], "upcoming": []},
+            {
+                "date": trade_date,
+                "provider": self.provider.source_name,
+                **self._resolved_stock_meta(resolved),
+                "history": [],
+                "upcoming": [],
+            },
         )
 
     def northbound_flow(self, history_days: int = 20) -> dict:
@@ -311,30 +380,46 @@ class ASharesSkill:
         )
 
     def stock_info(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return self._safe_dict_payload(
             lambda: self.provider.get_stock_info(stock_code),
-            {"code": stock_code, "provider": self.provider.source_name},
+            {"code": stock_code, "provider": self.provider.source_name, **self._resolved_stock_meta(resolved)},
         )
 
     def realtime_quotes(self, codes: list[str], kind: str = "auto") -> dict:
+        resolved_inputs: list[str] = []
+        for item in codes:
+            raw = str(item).strip()
+            if raw and kind in {"auto", "stock"}:
+                try:
+                    resolved_inputs.append(self._resolve_stock_input(raw)["code"])
+                    continue
+                except Exception:
+                    pass
+            resolved_inputs.append(raw)
         try:
-            items = self.provider.get_realtime_quotes(codes, kind)
+            items = self.provider.get_realtime_quotes(resolved_inputs, kind)
         except Exception as exc:
             return {
                 "provider": self.provider.source_name,
                 "kind": kind,
                 "available": False,
                 "error": str(exc),
+                "inputs": codes,
                 "items": [],
             }
         return {
             "provider": self.provider.source_name,
             "kind": kind,
             "available": True,
+            "inputs": codes,
             "items": items,
         }
 
     def valuation(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         quotes_payload = self.realtime_quotes([stock_code], kind="stock")
         quote = quotes_payload.get("items", [{}])[0] if quotes_payload.get("items") else {}
         consensus = self.consensus_eps(stock_code)
@@ -362,7 +447,7 @@ class ASharesSkill:
         )
         payload = self._workflow_meta(
             "valuation",
-            {"stock_code": stock_code},
+            {"stock_code": stock_code, "stock_query": resolved["query"]},
             available=bool(quote),
             degraded_reasons=degraded_reasons,
             errors=errors,
@@ -395,6 +480,7 @@ class ASharesSkill:
             },
             }
         )
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def compare_valuations(self, stock_codes: list[str]) -> dict:
@@ -402,6 +488,7 @@ class ASharesSkill:
         items.sort(key=lambda item: item.get("peg") if item.get("peg") is not None else float("inf"))
         return {
             "provider": self.provider.source_name,
+            "inputs": stock_codes,
             "items": items,
         }
 
@@ -515,6 +602,8 @@ class ASharesSkill:
 
     def quick_research(self, stock_code: str, trade_date: str | None = None) -> dict:
         observe_date = trade_date or shanghai_today_str()
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         valuation = self.valuation(stock_code)
         strategy_setup = self.analyzer.evaluate_trade_setup(stock_code, observe_date)
         market_cycle = self.analyzer.assess_market_cycle(observe_date)
@@ -536,7 +625,7 @@ class ASharesSkill:
             degraded_reasons.append("reports_missing")
         payload = self._workflow_meta(
             "quick-research",
-            {"stock_code": stock_code, "date": observe_date},
+            {"stock_code": stock_code, "stock_query": resolved["query"], "date": observe_date},
             available=valuation.get("available", True),
             degraded_reasons=degraded_reasons,
             errors=list(valuation.get("errors", [])),
@@ -586,9 +675,12 @@ class ASharesSkill:
             "reports": reports.get("items", []),
             }
         )
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def price_bars(self, stock_code: str, frequency: int = 4, limit: int = 20) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             items = self.provider.get_price_bars(stock_code, frequency, limit)
         except Exception as exc:
@@ -598,6 +690,7 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "items": [],
             }
         return {
@@ -605,10 +698,13 @@ class ASharesSkill:
             "frequency": frequency,
             "provider": self.provider.source_name,
             "available": True,
+            **self._resolved_stock_meta(resolved),
             "items": items,
         }
 
     def order_book(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             payload = self.provider.get_order_book(stock_code)
         except Exception as exc:
@@ -617,13 +713,17 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "data": {},
             }
         payload["provider"] = self.provider.source_name
         payload["available"] = True
+        payload.update(self._resolved_stock_meta(resolved))
         return payload
 
     def transactions(self, stock_code: str, start: int = 0, limit: int = 50) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             items = self.provider.get_transactions(stock_code, start, limit)
         except Exception as exc:
@@ -632,16 +732,20 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "items": [],
             }
         return {
             "stock_code": stock_code,
             "provider": self.provider.source_name,
             "available": True,
+            **self._resolved_stock_meta(resolved),
             "items": items,
         }
 
     def financial_snapshot(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             payload = self.provider.get_financial_snapshot(stock_code)
         except Exception as exc:
@@ -650,16 +754,20 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "data": {},
             }
         return {
             "stock_code": stock_code,
             "provider": self.provider.source_name,
             "available": True,
+            **self._resolved_stock_meta(resolved),
             "data": payload,
         }
 
     def f10_profile(self, stock_code: str, category: str | None = None) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             items = self.provider.get_f10_profile(stock_code, category)
         except Exception as exc:
@@ -669,6 +777,7 @@ class ASharesSkill:
                 "available": False,
                 "category": category,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "items": {},
             }
         return {
@@ -676,18 +785,24 @@ class ASharesSkill:
             "provider": self.provider.source_name,
             "available": True,
             "category": category,
+            **self._resolved_stock_meta(resolved),
             "items": items,
         }
 
     def financial_report(self, stock_code: str, report_type: str = "lrb", page_size: int = 20) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         return {
             "stock_code": stock_code,
             "report_type": report_type,
             "provider": self.provider.source_name,
+            **self._resolved_stock_meta(resolved),
             "items": self.provider.get_financial_report(stock_code, report_type, page_size),
         }
 
     def consensus_eps(self, stock_code: str) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
         try:
             items = self.provider.get_consensus_eps(stock_code)
         except Exception as exc:
@@ -696,12 +811,14 @@ class ASharesSkill:
                 "provider": self.provider.source_name,
                 "available": False,
                 "error": str(exc),
+                **self._resolved_stock_meta(resolved),
                 "items": [],
             }
         return {
             "stock_code": stock_code,
             "provider": self.provider.source_name,
             "available": True,
+            **self._resolved_stock_meta(resolved),
             "items": items,
         }
 

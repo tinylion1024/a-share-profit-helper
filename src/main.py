@@ -51,11 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("self-check", help="检查 Skill 是否可运行")
 
     risk = subparsers.add_parser("risk", help="风险扫描")
-    risk.add_argument("--code", required=True, help="股票代码")
+    risk.add_argument("--code", required=True, help="股票代码或简称")
     risk.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     diagnose = subparsers.add_parser("diagnose", help="诊股")
-    diagnose.add_argument("--code", required=True, help="股票代码")
+    diagnose.add_argument("--code", required=True, help="股票代码或简称")
     diagnose.add_argument("--scenario", default="诊股", help="场景名称")
     diagnose.add_argument("--horizon", default="短线", help="持仓周期")
     diagnose.add_argument("--risk-preference", default="平衡型", help="风险偏好")
@@ -74,15 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     market_cycle.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     plan = subparsers.add_parser("plan", help="交易计划")
-    plan.add_argument("--code", required=True, help="股票代码")
+    plan.add_argument("--code", required=True, help="股票代码或简称")
     plan.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     playbook = subparsers.add_parser("playbook", help="方法论单票执行手册")
-    playbook.add_argument("--code", required=True, help="股票代码")
+    playbook.add_argument("--code", required=True, help="股票代码或简称")
     playbook.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     news = subparsers.add_parser("news", help="个股新闻")
-    news.add_argument("--code", required=True, help="股票代码")
+    news.add_argument("--code", required=True, help="股票代码或简称")
     news.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     telegraph = subparsers.add_parser("telegraph", help="市场快讯")
@@ -92,11 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
     global_news.add_argument("--page-size", type=int, default=20, help="返回条数")
 
     announcements = subparsers.add_parser("announcements", help="巨潮公告")
-    announcements.add_argument("--code", required=True, help="股票代码")
+    announcements.add_argument("--code", required=True, help="股票代码或简称")
     announcements.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     fund_flow = subparsers.add_parser("fund-flow", help="资金流")
-    fund_flow.add_argument("--code", required=True, help="股票代码")
+    fund_flow.add_argument("--code", required=True, help="股票代码或简称")
     fund_flow.add_argument("--period", choices=["minute", "120d"], default="minute", help="资金流周期")
     fund_flow.add_argument("--limit", type=int, default=120, help="120日资金流条数")
 
@@ -108,14 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
     hot_stocks.add_argument("--page-size", type=int, default=20, help="返回条数")
 
     concept_blocks = subparsers.add_parser("concept-blocks", help="概念板块归属")
-    concept_blocks.add_argument("--code", required=True, help="股票代码")
+    concept_blocks.add_argument("--code", required=True, help="股票代码或简称")
 
     reports = subparsers.add_parser("reports", help="个股研报")
-    reports.add_argument("--code", required=True, help="股票代码")
+    reports.add_argument("--code", required=True, help="股票代码或简称")
     reports.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     dragon_tiger = subparsers.add_parser("dragon-tiger", help="个股龙虎榜")
-    dragon_tiger.add_argument("--code", required=True, help="股票代码")
+    dragon_tiger.add_argument("--code", required=True, help="股票代码或简称")
     dragon_tiger.add_argument("--date", help="交易日 (YYYY-MM-DD)")
     dragon_tiger.add_argument("--look-back", type=int, default=30, help="回看天数")
 
@@ -124,23 +124,23 @@ def build_parser() -> argparse.ArgumentParser:
     daily_dragon_tiger.add_argument("--min-net-buy", type=float, help="净买额下限，单位万元")
 
     margin = subparsers.add_parser("margin", help="融资融券")
-    margin.add_argument("--code", required=True, help="股票代码")
+    margin.add_argument("--code", required=True, help="股票代码或简称")
     margin.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     block_trades = subparsers.add_parser("block-trades", help="大宗交易")
-    block_trades.add_argument("--code", required=True, help="股票代码")
+    block_trades.add_argument("--code", required=True, help="股票代码或简称")
     block_trades.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     holders = subparsers.add_parser("holders", help="股东户数")
-    holders.add_argument("--code", required=True, help="股票代码")
+    holders.add_argument("--code", required=True, help="股票代码或简称")
     holders.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     dividends = subparsers.add_parser("dividends", help="分红送转")
-    dividends.add_argument("--code", required=True, help="股票代码")
+    dividends.add_argument("--code", required=True, help="股票代码或简称")
     dividends.add_argument("--page-size", type=int, default=10, help="返回条数")
 
     lockup = subparsers.add_parser("lockup", help="限售解禁")
-    lockup.add_argument("--code", required=True, help="股票代码")
+    lockup.add_argument("--code", required=True, help="股票代码或简称")
     lockup.add_argument("--date", help="观察日 (YYYY-MM-DD)")
     lockup.add_argument("--forward-days", type=int, default=90, help="未来观察天数")
 
@@ -148,17 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
     northbound.add_argument("--history-days", type=int, default=20, help="缓存历史天数")
 
     stock_info = subparsers.add_parser("stock-info", help="个股信息")
-    stock_info.add_argument("--code", required=True, help="股票代码")
+    stock_info.add_argument("--code", required=True, help="股票代码或简称")
 
     quotes = subparsers.add_parser("quotes", help="腾讯财经批量实时行情")
-    quotes.add_argument("--codes", nargs="+", required=True, help="股票/指数/ETF 代码，支持逗号分隔")
+    quotes.add_argument("--codes", nargs="+", required=True, help="股票/指数/ETF 代码或简称，支持逗号分隔")
     quotes.add_argument("--kind", choices=["auto", "stock", "index", "etf"], default="auto", help="代码类型")
 
     valuation = subparsers.add_parser("valuation", help="单票完整估值")
-    valuation.add_argument("--code", required=True, help="股票代码")
+    valuation.add_argument("--code", required=True, help="股票代码或简称")
 
     compare = subparsers.add_parser("compare", help="批量估值对比")
-    compare.add_argument("--codes", nargs="+", required=True, help="股票代码，支持逗号分隔")
+    compare.add_argument("--codes", nargs="+", required=True, help="股票代码或简称，支持逗号分隔")
 
     theme_research = subparsers.add_parser("theme-research", help="主题研报批量检索")
     theme_research.add_argument("--queries", nargs="+", required=True, help="检索语句，支持逗号分隔")
@@ -167,36 +167,36 @@ def build_parser() -> argparse.ArgumentParser:
     theme_research.add_argument("--supplement-per-stock", type=int, default=2, help="每个标的补充的东财研报数")
 
     quick_research = subparsers.add_parser("quick-research", help="新标的快速调研")
-    quick_research.add_argument("--code", required=True, help="股票代码")
+    quick_research.add_argument("--code", required=True, help="股票代码或简称")
     quick_research.add_argument("--date", help="观察日 (YYYY-MM-DD)")
 
     kline = subparsers.add_parser("kline", help="mootdx K线")
-    kline.add_argument("--code", required=True, help="股票代码")
+    kline.add_argument("--code", required=True, help="股票代码或简称")
     kline.add_argument("--frequency", type=int, default=4, help="4日线 5周线 6月线 7/8/9/10/11分时")
     kline.add_argument("--limit", type=int, default=20, help="返回条数")
 
     order_book = subparsers.add_parser("order-book", help="mootdx 五档盘口")
-    order_book.add_argument("--code", required=True, help="股票代码")
+    order_book.add_argument("--code", required=True, help="股票代码或简称")
 
     transactions = subparsers.add_parser("transactions", help="mootdx 逐笔成交")
-    transactions.add_argument("--code", required=True, help="股票代码")
+    transactions.add_argument("--code", required=True, help="股票代码或简称")
     transactions.add_argument("--start", type=int, default=0, help="起始偏移")
     transactions.add_argument("--limit", type=int, default=50, help="返回条数")
 
     quarterly_snapshot = subparsers.add_parser("quarterly-snapshot", help="mootdx 季报快照")
-    quarterly_snapshot.add_argument("--code", required=True, help="股票代码")
+    quarterly_snapshot.add_argument("--code", required=True, help="股票代码或简称")
 
     f10 = subparsers.add_parser("f10", help="mootdx F10 文本资料")
-    f10.add_argument("--code", required=True, help="股票代码")
+    f10.add_argument("--code", required=True, help="股票代码或简称")
     f10.add_argument("--category", help="F10 分类，如 最新提示 / 公司概况 / 财务分析")
 
     finance = subparsers.add_parser("finance", help="新浪财报三表")
-    finance.add_argument("--code", required=True, help="股票代码")
+    finance.add_argument("--code", required=True, help="股票代码或简称")
     finance.add_argument("--report-type", choices=["lrb", "fzb", "llb"], default="lrb", help="报表类型")
     finance.add_argument("--page-size", type=int, default=20, help="返回期数")
 
     consensus_eps = subparsers.add_parser("consensus-eps", help="同花顺一致预期EPS")
-    consensus_eps.add_argument("--code", required=True, help="股票代码")
+    consensus_eps.add_argument("--code", required=True, help="股票代码或简称")
 
     iwencai_search = subparsers.add_parser("iwencai-search", help="iwencai 语义检索")
     iwencai_search.add_argument("--query", required=True, help="查询语句")

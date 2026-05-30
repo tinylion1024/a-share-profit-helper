@@ -83,6 +83,7 @@ class TencentLiveProvider(MarketDataProvider):
     def __init__(self, config: Config | None = None):
         self.config = config or Config.load()
         self._max_retries = 2
+        self._stock_lookup_rows: list[dict[str, str]] | None = None
 
     @property
     def source_name(self) -> str:
@@ -468,6 +469,86 @@ class TencentLiveProvider(MarketDataProvider):
             codes = [str(item.get("f12", "")).strip() for item in rows if str(item.get("f12", "")).strip().isdigit()]
             return codes[:40]
         return configured
+
+    def _load_stock_lookup_rows(self) -> list[dict[str, str]]:
+        if self._stock_lookup_rows is not None:
+            return self._stock_lookup_rows
+        rows = self._fetch_all_a_share_rows(limit=5000, sort_field="f12", sort_order="1", fields="f12,f14")
+        normalized: list[dict[str, str]] = []
+        for item in rows:
+            code = str(item.get("f12", "")).strip()
+            name = str(item.get("f14", "")).strip()
+            if len(code) == 6 and code.isdigit() and name:
+                normalized.append({"code": code, "name": name})
+        self._stock_lookup_rows = normalized
+        return normalized
+
+    def resolve_stock_identifier(self, identifier: str) -> dict[str, str]:
+        raw = str(identifier or "").strip()
+        normalized = raw.lower()
+        if re.fullmatch(r"(sh|sz|bj)\d{6}", normalized):
+            code = normalized[2:]
+            stock_name = ""
+            try:
+                stock_name = self.get_stock_info(code).get("name", "")
+            except Exception:
+                stock_name = ""
+            return {
+                "query": raw,
+                "code": code,
+                "name": stock_name,
+                "matched_by": "symbol",
+            }
+        if re.fullmatch(r"\d{6}", raw):
+            stock_name = ""
+            try:
+                stock_name = self.get_stock_info(raw).get("name", "")
+            except Exception:
+                stock_name = ""
+            return {
+                "query": raw,
+                "code": raw,
+                "name": stock_name,
+                "matched_by": "code",
+            }
+
+        exact: dict[str, str] | None = None
+        prefix_matches: list[dict[str, str]] = []
+        fuzzy_matches: list[dict[str, str]] = []
+        for item in self._load_stock_lookup_rows():
+            if raw == item["name"]:
+                exact = item
+                break
+            if item["name"].startswith(raw):
+                prefix_matches.append(item)
+            elif raw in item["name"]:
+                fuzzy_matches.append(item)
+
+        if exact:
+            return {
+                "query": raw,
+                "code": exact["code"],
+                "name": exact["name"],
+                "matched_by": "name_exact",
+            }
+        if len(prefix_matches) == 1:
+            item = prefix_matches[0]
+            return {
+                "query": raw,
+                "code": item["code"],
+                "name": item["name"],
+                "matched_by": "name_prefix",
+            }
+        if len(fuzzy_matches) == 1:
+            item = fuzzy_matches[0]
+            return {
+                "query": raw,
+                "code": item["code"],
+                "name": item["name"],
+                "matched_by": "name_fuzzy",
+            }
+
+        raise DataNotFoundError(raw)
 
     def _fetch_market_breadth(self) -> dict[str, Any]:
         rows = self._fetch_all_a_share_rows(limit=5000, sort_field="f3", sort_order="1")

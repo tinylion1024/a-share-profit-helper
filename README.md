@@ -21,6 +21,21 @@
 - `theme-research`
   主题研报批量检索，支持多 query `iwencai` 语义检索和东财研报补充。
 
+## OpenClaw 自然语言使用
+
+这个 Skill 的目标用法不是让最终用户手写命令，而是让 OpenClaw 在后台根据自然语言自动选择工作流并执行命令。
+
+- 用户说 `宁德时代能买吗`
+  OpenClaw 应路由到 `diagnose`，必要时补 `playbook`
+- 用户说 `今天市场情绪怎么样，适合进攻还是防守`
+  OpenClaw 应路由到 `market-cycle`
+- 用户说 `帮我快速研究一下比亚迪`
+  OpenClaw 应路由到 `quick-research`
+- 用户说 `机器人主题最近有什么研报`
+  OpenClaw 应路由到 `theme-research`
+
+当前 CLI 也已支持 `股票代码或简称`，因此即使 OpenClaw 把 `宁德时代` 直接作为参数传入，skill 也会在内部解析成对应股票代码。
+
 ## 快速开始
 
 ```bash

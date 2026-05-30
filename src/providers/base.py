@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -35,6 +36,67 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def list_stock_candidates(self) -> list[StockSnapshot]:
         """Return all candidate stocks known by the provider."""
+
+    def resolve_stock_identifier(self, identifier: str) -> dict[str, str]:
+        """Resolve a stock code or Chinese short name to a canonical stock code."""
+        raw = str(identifier or "").strip()
+        if not raw:
+            raise DataNotFoundError("empty stock identifier")
+
+        normalized = raw.lower()
+        if re.fullmatch(r"(sh|sz|bj)\d{6}", normalized):
+            return {
+                "query": raw,
+                "code": normalized[2:],
+                "name": "",
+                "matched_by": "symbol",
+            }
+        if re.fullmatch(r"\d{6}", raw):
+            stock_name = ""
+            for stock in self.list_stock_candidates():
+                if stock.code == raw:
+                    stock_name = stock.name
+                    break
+            return {
+                "query": raw,
+                "code": raw,
+                "name": stock_name,
+                "matched_by": "code",
+            }
+
+        prefix_matches: list[StockSnapshot] = []
+        fuzzy_matches: list[StockSnapshot] = []
+        for stock in self.list_stock_candidates():
+            if raw == stock.name:
+                return {
+                    "query": raw,
+                    "code": stock.code,
+                    "name": stock.name,
+                    "matched_by": "name_exact",
+                }
+            if stock.name.startswith(raw):
+                prefix_matches.append(stock)
+            elif raw in stock.name:
+                fuzzy_matches.append(stock)
+
+        if len(prefix_matches) == 1:
+            stock = prefix_matches[0]
+            return {
+                "query": raw,
+                "code": stock.code,
+                "name": stock.name,
+                "matched_by": "name_prefix",
+            }
+        if len(fuzzy_matches) == 1:
+            stock = fuzzy_matches[0]
+            return {
+                "query": raw,
+                "code": stock.code,
+                "name": stock.name,
+                "matched_by": "name_fuzzy",
+            }
+
+        raise DataNotFoundError(raw)
 
     def get_stock_news(self, stock_code: str, page_size: int = 10) -> list[dict[str, Any]]:
         """Return the latest stock-specific news items."""
