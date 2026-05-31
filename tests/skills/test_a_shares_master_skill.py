@@ -1518,20 +1518,67 @@ class SkillCompatibilityTests(unittest.TestCase):
           </tbody>
         </table>
         """
-        taoguba_dianzan_html = """
-        <div class="article-card">
-          <a href="/a/demo-1" title="机器人主线继续加强 300750 低吸窗口"></a>
-          <span data-userid="134434"></span>
-          <a class="name">炒股养家</a>
-          <span>点赞 2680</span>
-          <span>评论 192</span>
+        taoguba_realtime_reply_html = """
+        <div class="Nbbs-tiezi-lists">
+          <div class="left middle-list-tittle fs15 c333 cursor overhide">
+            <a class="overhide mw300" href="a/demo-1" title='机器人主线继续加强 300750 低吸窗口' target="_blank">机器人主线继续加强 300750 低吸窗口</a>
+            <span>&nbsp;(2680)</span>
+          </div>
+          <div class="left middle-list-talk overhide">192 / 12888</div>
+          <div class="left middle-list-reply">05-29 13:20</div>
+          <div class="left middle-list-user cblue cursor overhide">
+            <a class="mw100 overhide" id="pop_8398404" href="blog/134434" onmouseover="userTips(this,134434,null,20260529,'T',8398404);" onmouseout="offTip()" target="_blank">炒股养家</a>
+          </div>
+          <div class="left middle-list-post">05-29 09:21</div>
+          <div class="clear"></div>
         </div>
-        <div class="article-card">
-          <a href="/a/demo-2" title="储能回流看中军 002594 趋势机会"></a>
-          <span data-userid="252069"></span>
-          <a class="name">柏拉爱空</a>
-          <span>点赞 1730</span>
-          <span>评论 121</span>
+        """
+        taoguba_realtime_post_html = """
+        <div class="Nbbs-tiezi-lists">
+          <div class="left middle-list-tittle fs15 c333 cursor overhide">
+            <a class="overhide mw300" href="a/demo-2" title='储能回流看中军 002594 趋势机会' target="_blank">储能回流看中军 002594 趋势机会</a>
+            <span>&nbsp;(1730)</span>
+          </div>
+          <div class="left middle-list-talk overhide">121 / 8021</div>
+          <div class="left middle-list-reply">05-29 11:32</div>
+          <div class="left middle-list-user cblue cursor overhide">
+            <a class="mw100 overhide" id="pop_8398405" href="blog/252069" onmouseover="userTips(this,252069,null,20260529,'T',8398405);" onmouseout="offTip()" target="_blank">柏拉爱空</a>
+          </div>
+          <div class="left middle-list-post">05-29 10:18</div>
+          <div class="clear"></div>
+        </div>
+        """
+        taoguba_realtime_hot_html = """
+        <div class="Nbbs-tiezi-lists">
+          <div class="left middle-list-tittle fs15 c333 cursor overhide">
+            <a class="overhide mw300" href="a/demo-1" title='机器人主线继续加强 300750 低吸窗口' target="_blank">机器人主线继续加强 300750 低吸窗口</a>
+            <span>&nbsp;(2680)</span>
+          </div>
+          <div class="left middle-list-talk overhide">193 / 12900</div>
+          <div class="left middle-list-reply">05-29 13:35</div>
+          <div class="left middle-list-user cblue cursor overhide">
+            <a class="mw100 overhide" id="pop_8398404" href="blog/134434" onmouseover="userTips(this,134434,null,20260529,'T',8398404);" onmouseout="offTip()" target="_blank">炒股养家</a>
+          </div>
+          <div class="left middle-list-post">05-29 09:21</div>
+          <div class="clear"></div>
+        </div>
+        """
+        taoguba_classic_html = """
+        <div class="Nbbs-tiezi-lists">
+          <div class="left middle-list-tittle fs15 c333 cursor overhide">
+            <a class="overhide mw300" href="a/demo-3" title='养家心法论股市 300750 趋势信仰' target="_blank">
+              <span style="color: red;position: relative;top: -1px;">[精]</span>
+              养家心法论股市 300750 趋势信仰
+            </a>
+            <span>&nbsp;(4930)</span>
+          </div>
+          <div class="left middle-list-talk overhide">4306 / 3181020</div>
+          <div class="left middle-list-reply">05-30 23:50</div>
+          <div class="left middle-list-user cblue cursor overhide">
+            <a class="mw100 overhide" id="pop_8398406" href="blog/134434" onmouseover="userTips(this,134434,null,20260530,'T',8398406);" onmouseout="offTip()" target="_blank">炒股养家</a>
+          </div>
+          <div class="left middle-list-post">08-18 22:13</div>
+          <div class="clear"></div>
         </div>
         """
         taoguba_article_detail = """
@@ -1570,12 +1617,18 @@ class SkillCompatibilityTests(unittest.TestCase):
             "datas": [{"股票代码": "300750", "股票简称": "宁德时代", "ROE": 24.8}],
         }
 
-        def fake_get_text(url: str, encoding: str = "gbk") -> str:
+        def fake_get_text(url: str, encoding: str = "gbk", headers=None) -> str:
             if "qt.gtimg.cn" in url:
                 return quote_text
-            if url == "https://www.tgb.cn/dianzan":
-                return taoguba_dianzan_html
-            if url in {"https://www.tgb.cn/a/demo-1", "https://www.tgb.cn/a/demo-2"}:
+            if url == "https://www.tgb.cn/dianzan/0-0":
+                return taoguba_realtime_reply_html
+            if url == "https://www.tgb.cn/dianzan/0-1":
+                return taoguba_realtime_post_html
+            if url == "https://www.tgb.cn/dianzan/0-4":
+                return taoguba_realtime_hot_html
+            if url == "https://www.tgb.cn/dianzan/0-2":
+                return taoguba_classic_html
+            if url in {"https://www.tgb.cn/a/demo-1", "https://www.tgb.cn/a/demo-2", "https://www.tgb.cn/a/demo-3"}:
                 return taoguba_article_detail
             if url == "https://www.tgb.cn/quotes/sz300750":
                 return taoguba_quote_html
@@ -1703,14 +1756,82 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertTrue(taoguba_hot[0]["author_is_vip"])
         self.assertIn("300750", taoguba_hot[0]["symbols"])
         self.assertTrue(taoguba_hot[0]["content"])
+        self.assertEqual(taoguba_hot[0]["source_stream"], "realtime")
+        self.assertIn(0, taoguba_hot[0]["source_flags"])
+        self.assertIn(4, taoguba_hot[0]["source_flags"])
         self.assertEqual(taoguba_sentiment["forum"], "taoguba")
         self.assertTrue(taoguba_sentiment["hot_topics"])
+        self.assertEqual(taoguba_sentiment["realtime_flags"], [0, 1, 4])
+        self.assertEqual(taoguba_sentiment["classic_flag"], 2)
+        self.assertTrue(taoguba_sentiment["classic_articles"])
         self.assertEqual(taoguba_stock["stock_code"], "300750")
         self.assertEqual(taoguba_stock["comments"][0]["stance"], "bullish")
         self.assertGreaterEqual(len(taoguba_stock["vip_views"]), 1)
         self.assertEqual(taoguba_vip[0]["author_name"], "炒股养家")
         self.assertEqual(len(iwencai_search), 1)
         self.assertEqual(iwencai_query[0]["股票代码"], "300750")
+
+    def test_taoguba_requests_attach_browser_headers(self) -> None:
+        provider = TencentLiveProvider(config=Config(offline_mode=False))
+        observed_calls: list[tuple[str, str, dict[str, str] | None]] = []
+
+        def fake_get_text(url: str, encoding: str = "gbk", headers=None) -> str:
+            observed_calls.append((url, encoding, headers))
+            if url in {
+                "https://www.tgb.cn/dianzan/0-0",
+                "https://www.tgb.cn/dianzan/0-1",
+                "https://www.tgb.cn/dianzan/0-4",
+                "https://www.tgb.cn/dianzan/0-2",
+            }:
+                return """
+                <div class="Nbbs-tiezi-lists">
+                  <div class="left middle-list-tittle fs15 c333 cursor overhide">
+                    <a class="overhide mw300" href="a/demo-1" title='机器人主线继续加强 300750 低吸窗口' target="_blank">机器人主线继续加强 300750 低吸窗口</a>
+                    <span>&nbsp;(2680)</span>
+                  </div>
+                  <div class="left middle-list-talk overhide">192 / 12888</div>
+                  <div class="left middle-list-reply">05-29 13:20</div>
+                  <div class="left middle-list-user cblue cursor overhide">
+                    <a class="mw100 overhide" id="pop_8398404" href="blog/134434" onmouseover="userTips(this,134434,null,20260529,'T',8398404);" onmouseout="offTip()" target="_blank">炒股养家</a>
+                  </div>
+                  <div class="left middle-list-post">05-29 09:21</div>
+                  <div class="clear"></div>
+                </div>
+                """
+            if url == "https://www.tgb.cn/a/demo-1":
+                return "<html><body><p>正文</p></body></html>"
+            if url == "https://www.tgb.cn/quotes/sz300750":
+                return """
+                <script>
+                coolAttr = [
+                  {"id":"c1","userID":"134434","userName":"炒股养家","content":"宁德时代仍是主线核心。","likes":"328","replyNum":"18","createTime":"2026-05-29 09:43:00"}
+                ];
+                </script>
+                """
+            raise AssertionError(url)
+
+        with patch.object(provider, "_http_get_text", side_effect=fake_get_text):
+            provider.get_taoguba_hot_articles(1, include_content=True)
+            provider.get_taoguba_market_sentiment(1)
+            provider.get_taoguba_stock_comments("300750", 1)
+
+        taoguba_calls = [call for call in observed_calls if "tgb.cn" in call[0]]
+        self.assertGreaterEqual(len(taoguba_calls), 6)
+        for url, _, headers in taoguba_calls:
+            self.assertIsNotNone(headers, url)
+            self.assertIn("Chrome/136.0.0.0", headers["User-Agent"])
+            self.assertEqual(headers["Accept-Language"], "zh-CN,zh;q=0.9,en;q=0.8")
+            self.assertEqual(headers["Sec-Fetch-Mode"], "navigate")
+            self.assertTrue(headers["Referer"].startswith("https://www.tgb.cn/"))
+        header_by_url = {url: headers for url, _, headers in taoguba_calls if headers}
+        self.assertEqual(header_by_url["https://www.tgb.cn/dianzan/0-0"]["Referer"], "https://www.tgb.cn/")
+        self.assertEqual(header_by_url["https://www.tgb.cn/dianzan/0-1"]["Referer"], "https://www.tgb.cn/")
+        self.assertEqual(header_by_url["https://www.tgb.cn/dianzan/0-4"]["Referer"], "https://www.tgb.cn/")
+        self.assertEqual(header_by_url["https://www.tgb.cn/dianzan/0-2"]["Referer"], "https://www.tgb.cn/")
+        detail_referrers = [headers["Referer"] for url, _, headers in taoguba_calls if url == "https://www.tgb.cn/a/demo-1" and headers]
+        self.assertTrue(detail_referrers)
+        self.assertTrue(all(referer.startswith("https://www.tgb.cn/dianzan/0-") for referer in detail_referrers))
+        self.assertEqual(header_by_url["https://www.tgb.cn/quotes/sz300750"]["Referer"], "https://www.tgb.cn/")
 
     def test_valuation_and_research_workflows(self) -> None:
         skill = ASharesSkill(config=make_offline_config())

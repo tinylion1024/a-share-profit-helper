@@ -77,6 +77,15 @@ F10_CATEGORIES = (
     "公司大事",
 )
 
+TAOGUBA_REALTIME_FLAGS = (0, 1, 4)
+TAOGUBA_CLASSIC_FLAG = 2
+TAOGUBA_FLAG_LABELS = {
+    0: "reply-time",
+    1: "post-time",
+    2: "classic",
+    4: "hot",
+}
+
 
 class TencentLiveProvider(MarketDataProvider):
     """Fetch the latest stock and index data from Tencent finance."""
@@ -110,20 +119,53 @@ class TencentLiveProvider(MarketDataProvider):
             detail = str(last_error) if last_error else "unknown error"
         raise OnlineDataError(f"{label} failed after {self._max_retries} attempts: {detail}") from last_error
 
-    def _http_get_text(self, url: str, encoding: str = "gbk") -> str:
+    def _http_get_text(
+        self,
+        url: str,
+        encoding: str = "gbk",
+        headers: dict[str, str] | None = None,
+    ) -> str:
         def run() -> str:
+            request_headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json,text/plain,*/*",
+                "Referer": "https://gu.qq.com/",
+            }
+            if headers:
+                request_headers.update(headers)
             request = Request(
                 url,
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "application/json,text/plain,*/*",
-                    "Referer": "https://gu.qq.com/",
-                },
+                headers=request_headers,
             )
             with urlopen(request, timeout=self.config.source_timeout_seconds) as response:
                 return response.read().decode(encoding, errors="ignore")
 
         return self._request_with_retries(f"GET text {url}", run)
+
+    def _taoguba_headers(self, referer: str = "https://www.tgb.cn/") -> dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            ),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8"
+            ),
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-CH-UA": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"macOS"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Referer": referer,
+        }
 
     def _http_get_json(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
         def run() -> dict[str, Any]:
@@ -510,6 +552,102 @@ class TencentLiveProvider(MarketDataProvider):
         html_text: str,
         page_size: int,
         include_content: bool,
+        source_flag: int | None = None,
+        source_kind: str = "realtime",
+        referer: str = "https://www.tgb.cn/",
+    ) -> list[dict[str, Any]]:
+        cards = self._extract_taoguba_hot_articles_from_blocks(
+            html_text,
+            page_size,
+            include_content,
+            source_flag=source_flag,
+            source_kind=source_kind,
+            referer=referer,
+        )
+        if cards:
+            return cards[:page_size]
+        return self._extract_taoguba_hot_articles_from_legacy_html(
+            html_text,
+            page_size,
+            include_content,
+            source_flag=source_flag,
+            source_kind=source_kind,
+            referer=referer,
+        )
+
+    def _extract_taoguba_hot_articles_from_blocks(
+        self,
+        html_text: str,
+        page_size: int,
+        include_content: bool,
+        source_flag: int | None,
+        source_kind: str,
+        referer: str,
+    ) -> list[dict[str, Any]]:
+        cards: list[dict[str, Any]] = []
+        blocks = re.findall(r'<div class="Nbbs-tiezi-lists">(.*?)<div class="clear"></div>\s*</div>', html_text, re.DOTALL)
+        for block in blocks:
+            link_match = re.search(r'href="(?P<href>a/[^"]+)"\s+title=(?P<quote>[\'"])(?P<title>.*?)(?P=quote)', block, re.DOTALL)
+            if not link_match:
+                continue
+            url = "https://www.tgb.cn/" + link_match.group("href").lstrip("/")
+            title = self._normalize_text(link_match.group("title"))
+            author_name_match = re.search(r'<a class="mw100[^"]*"[^>]*>([^<]+)</a>', block)
+            author_id_match = re.search(r'userTips\(this,(\d+),', block) or re.search(r'href="blog/(\d+)"', block)
+            likes_match = re.search(r"<span>&nbsp;\((\d+)\)</span>", block)
+            talk_match = re.search(r'middle-list-talk[^>]*>(\d+)\s*/\s*(\d+)', block)
+            reply_time_match = re.search(r'middle-list-reply[^>]*>([^<]+)</div>', block)
+            post_time_match = re.search(r'middle-list-post[^>]*>([^<]+)</div>', block)
+            author_name = self._normalize_text(author_name_match.group(1) if author_name_match else "")
+            author_id = author_id_match.group(1) if author_id_match else ""
+            meta = self._taoguba_author_meta(author_id, author_name)
+            item = {
+                "id": link_match.group("href").strip("/").replace("/", "-"),
+                "title": title,
+                "url": url,
+                "publish_time": self._normalize_text(post_time_match.group(1) if post_time_match else ""),
+                "reply_time": self._normalize_text(reply_time_match.group(1) if reply_time_match else ""),
+                "likes": int(likes_match.group(1) if likes_match else 0),
+                "replies": int(talk_match.group(1) if talk_match else 0),
+                "reads": int(talk_match.group(2) if talk_match else 0),
+                "symbols": self._extract_stock_codes(title),
+                "topics": self._extract_taoguba_topics(title),
+                "content": "",
+                "source_flag": source_flag,
+                "source_flags": [source_flag] if source_flag is not None else [],
+                "source_stream": source_kind,
+                "source_streams": [source_kind],
+                "source_label": TAOGUBA_FLAG_LABELS.get(source_flag, source_kind),
+                **meta,
+            }
+            if include_content:
+                try:
+                    detail_html = self._http_get_text(
+                        url,
+                        encoding="utf-8",
+                        headers=self._taoguba_headers(referer),
+                    )
+                    content = self._extract_taoguba_article_content(detail_html)
+                    item["content"] = content[:600]
+                    if not item["symbols"]:
+                        item["symbols"] = self._extract_stock_codes(content)
+                    if not item["topics"]:
+                        item["topics"] = self._extract_taoguba_topics(content)
+                except Exception:
+                    item["content"] = ""
+            cards.append(item)
+            if len(cards) >= page_size:
+                break
+        return cards
+
+    def _extract_taoguba_hot_articles_from_legacy_html(
+        self,
+        html_text: str,
+        page_size: int,
+        include_content: bool,
+        source_flag: int | None,
+        source_kind: str,
+        referer: str,
     ) -> list[dict[str, Any]]:
         cards: list[dict[str, Any]] = []
         pattern = re.compile(r'href="(?P<href>/a/[^"]+)"[^>]*title="(?P<title>[^"]+)"', re.DOTALL)
@@ -539,13 +677,21 @@ class TencentLiveProvider(MarketDataProvider):
                 "symbols": self._extract_stock_codes(title),
                 "topics": self._extract_taoguba_topics(title),
                 "content": "",
+                "source_flag": source_flag,
+                "source_flags": [source_flag] if source_flag is not None else [],
+                "source_stream": source_kind,
+                "source_streams": [source_kind],
+                "source_label": TAOGUBA_FLAG_LABELS.get(source_flag, source_kind),
                 **meta,
             }
             if include_content:
                 try:
-                    detail_html = self._http_get_text(url, encoding="utf-8")
-                    paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", detail_html, re.DOTALL)
-                    content = " ".join(self._normalize_text(p) for p in paragraphs[:8] if self._normalize_text(p))
+                    detail_html = self._http_get_text(
+                        url,
+                        encoding="utf-8",
+                        headers=self._taoguba_headers(referer),
+                    )
+                    content = self._extract_taoguba_article_content(detail_html)
                     item["content"] = content[:600]
                     if not item["symbols"]:
                         item["symbols"] = self._extract_stock_codes(content)
@@ -557,6 +703,153 @@ class TencentLiveProvider(MarketDataProvider):
             if len(cards) >= page_size:
                 break
         return cards
+
+    def _extract_taoguba_article_content(self, detail_html: str) -> str:
+        block_match = re.search(
+            r'<div class="article-text[^"]*"[^>]*id="first"[^>]*>([\s\S]*?)</div>\s*'
+            r'(?:<div class="article-reward"|<div class="article-topic"|<div class="comment-content"|<div class="article-reply")',
+            detail_html,
+            re.DOTALL,
+        )
+        raw = ""
+        if block_match:
+            raw = block_match.group(1)
+        if not raw:
+            paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", detail_html, re.DOTALL)
+            raw = " ".join(segment for segment in paragraphs[:8] if segment)
+        raw = re.sub(r"<br\s*/?>", "\n", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"<img[^>]*>", " ", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"<[^>]+>", " ", raw)
+        return self._normalize_text(html.unescape(raw))
+
+    def _taoguba_dianzan_url(self, page_no: int, flag: int) -> str:
+        return f"https://www.tgb.cn/dianzan/{page_no}-{flag}"
+
+    def _merge_taoguba_article_groups(
+        self,
+        groups: list[list[dict[str, Any]]],
+        page_size: int,
+        prefer_realtime: bool = True,
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        by_key: dict[str, dict[str, Any]] = {}
+        for group in groups:
+            for item in group:
+                key = str(item.get("url") or item.get("id") or "")
+                if not key:
+                    continue
+                existing = by_key.get(key)
+                if existing is None:
+                    cloned = dict(item)
+                    cloned["source_flags"] = list(item.get("source_flags") or ([item["source_flag"]] if item.get("source_flag") is not None else []))
+                    cloned["source_streams"] = list(item.get("source_streams") or ([item["source_stream"]] if item.get("source_stream") else []))
+                    by_key[key] = cloned
+                    merged.append(cloned)
+                    continue
+                existing["likes"] = max(int(existing.get("likes", 0)), int(item.get("likes", 0)))
+                existing["replies"] = max(int(existing.get("replies", 0)), int(item.get("replies", 0)))
+                existing["reads"] = max(int(existing.get("reads", 0)), int(item.get("reads", 0)))
+                if not existing.get("content") and item.get("content"):
+                    existing["content"] = item["content"]
+                if not existing.get("publish_time") and item.get("publish_time"):
+                    existing["publish_time"] = item["publish_time"]
+                if not existing.get("reply_time") and item.get("reply_time"):
+                    existing["reply_time"] = item["reply_time"]
+                merged_symbols = list(existing.get("symbols") or [])
+                for symbol in item.get("symbols") or []:
+                    if symbol not in merged_symbols:
+                        merged_symbols.append(symbol)
+                existing["symbols"] = merged_symbols
+                merged_topics = list(existing.get("topics") or [])
+                for topic in item.get("topics") or []:
+                    if topic not in merged_topics:
+                        merged_topics.append(topic)
+                existing["topics"] = merged_topics
+                for flag in item.get("source_flags") or ([item["source_flag"]] if item.get("source_flag") is not None else []):
+                    if flag not in existing["source_flags"]:
+                        existing["source_flags"].append(flag)
+                for stream in item.get("source_streams") or ([item["source_stream"]] if item.get("source_stream") else []):
+                    if stream not in existing["source_streams"]:
+                        existing["source_streams"].append(stream)
+                if prefer_realtime and item.get("source_stream") == "realtime":
+                    existing["source_stream"] = "realtime"
+                elif not prefer_realtime and item.get("source_stream") == "classic":
+                    existing["source_stream"] = "classic"
+        merged.sort(
+            key=lambda item: (
+                0 if (prefer_realtime and "realtime" in (item.get("source_streams") or [])) else 1,
+                -int(item.get("replies", 0)),
+                -int(item.get("reads", 0)),
+                -int(item.get("likes", 0)),
+            )
+        )
+        return merged[:page_size]
+
+    def _get_taoguba_articles_by_flag(
+        self,
+        flag: int,
+        page_size: int,
+        include_content: bool,
+        page_no: int = 0,
+        source_kind: str = "realtime",
+    ) -> list[dict[str, Any]]:
+        url = self._taoguba_dianzan_url(page_no, flag)
+        html_text = self._http_get_text(
+            url,
+            encoding="utf-8",
+            headers=self._taoguba_headers("https://www.tgb.cn/"),
+        )
+        return self._extract_taoguba_hot_articles_from_html(
+            html_text,
+            page_size,
+            include_content,
+            source_flag=flag,
+            source_kind=source_kind,
+            referer=url,
+        )
+
+    def get_taoguba_classic_articles(
+        self,
+        page_size: int = 10,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        items = self._get_taoguba_articles_by_flag(
+            TAOGUBA_CLASSIC_FLAG,
+            page_size=page_size,
+            include_content=include_content,
+            source_kind="classic",
+        )
+        if items:
+            return items
+        raise OnlineDataError("taoguba classic article parsing returned empty data")
+
+    def _get_taoguba_community_pool(
+        self,
+        realtime_size: int,
+        classic_size: int,
+        include_content: bool,
+    ) -> dict[str, list[dict[str, Any]]]:
+        realtime_groups = [
+            self._get_taoguba_articles_by_flag(
+                flag,
+                page_size=realtime_size,
+                include_content=include_content,
+                source_kind="realtime",
+            )
+            for flag in TAOGUBA_REALTIME_FLAGS
+        ]
+        realtime_articles = self._merge_taoguba_article_groups(realtime_groups, realtime_size, prefer_realtime=True)
+        classic_articles = self.get_taoguba_classic_articles(classic_size, include_content=include_content)
+        merged_articles = self._merge_taoguba_article_groups(
+            [realtime_articles, classic_articles],
+            realtime_size + classic_size,
+            prefer_realtime=True,
+        )
+        return {
+            "realtime_articles": realtime_articles,
+            "classic_articles": classic_articles,
+            "articles": merged_articles,
+        }
 
     def _extract_taoguba_coolattr(self, html_text: str) -> list[dict[str, Any]]:
         match = re.search(r"coolAttr\s*=\s*(\[[\s\S]*?\])\s*;", html_text)
@@ -1867,14 +2160,29 @@ class TencentLiveProvider(MarketDataProvider):
         page_size: int = 10,
         include_content: bool = False,
     ) -> list[dict[str, Any]]:
-        html_text = self._http_get_text("https://www.tgb.cn/dianzan", encoding="utf-8")
-        items = self._extract_taoguba_hot_articles_from_html(html_text, page_size, include_content)
+        realtime_groups = [
+            self._get_taoguba_articles_by_flag(
+                flag,
+                page_size=page_size,
+                include_content=include_content,
+                source_kind="realtime",
+            )
+            for flag in TAOGUBA_REALTIME_FLAGS
+        ]
+        items = self._merge_taoguba_article_groups(realtime_groups, page_size, prefer_realtime=True)
         if items:
             return items
         raise OnlineDataError("taoguba hot article parsing returned empty data")
 
     def get_taoguba_market_sentiment(self, page_size: int = 20) -> dict[str, Any]:
-        articles = self.get_taoguba_hot_articles(page_size=page_size, include_content=True)
+        pool = self._get_taoguba_community_pool(
+            realtime_size=page_size,
+            classic_size=max(5, min(page_size, 10)),
+            include_content=True,
+        )
+        realtime_articles = pool["realtime_articles"]
+        classic_articles = pool["classic_articles"]
+        articles = pool["articles"]
         texts = [f"{item.get('title', '')} {item.get('content', '')}" for item in articles]
         sentiment = self._score_sentiment_texts(texts)
         topic_stats: dict[str, dict[str, Any]] = {}
@@ -1907,8 +2215,14 @@ class TencentLiveProvider(MarketDataProvider):
             **sentiment,
             "heat_score": heat_score,
             "sample_size": len(articles),
+            "realtime_sample_size": len(realtime_articles),
+            "classic_sample_size": len(classic_articles),
+            "realtime_flags": list(TAOGUBA_REALTIME_FLAGS),
+            "classic_flag": TAOGUBA_CLASSIC_FLAG,
             "hot_topics": hot_topics[:8],
             "vip_focus": unique_vip_focus[:8],
+            "realtime_articles": realtime_articles,
+            "classic_articles": classic_articles,
             "articles": articles,
         }
 
@@ -1918,7 +2232,11 @@ class TencentLiveProvider(MarketDataProvider):
         page_size: int = 30,
     ) -> list[dict[str, Any]]:
         symbol = self._resolve_symbol(stock_code)
-        html_text = self._http_get_text(f"https://www.tgb.cn/quotes/{symbol}", encoding="utf-8")
+        html_text = self._http_get_text(
+            f"https://www.tgb.cn/quotes/{symbol}",
+            encoding="utf-8",
+            headers=self._taoguba_headers("https://www.tgb.cn/"),
+        )
         payload = self._extract_taoguba_coolattr(html_text)
         if not payload:
             return []
@@ -1962,7 +2280,12 @@ class TencentLiveProvider(MarketDataProvider):
         stock_code: str | None = None,
         page_size: int = 10,
     ) -> list[dict[str, Any]]:
-        articles = self.get_taoguba_hot_articles(page_size=max(page_size * 2, 10), include_content=True)
+        pool = self._get_taoguba_community_pool(
+            realtime_size=max(page_size * 2, 10),
+            classic_size=max(page_size, 5),
+            include_content=True,
+        )
+        articles = pool["articles"]
         target_code = str(stock_code or "")
         items: list[dict[str, Any]] = []
         for article in articles:
