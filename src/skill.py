@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import math
-from typing import Optional
+from collections import Counter
+from typing import Any, Optional
 
 from src.config import Config
 from src.core import AnalysisPipeline, IntegratedAnalyzer, RiskChecker
@@ -71,9 +72,15 @@ class ASharesSkill:
         except Exception as exc:
             payload = dict(base)
             payload.update({"available": False, "error": str(exc), item_key: []})
+            payload["data_quality"] = self._build_data_quality(
+                available=False,
+                errors=[str(exc)],
+                source_count=1,
+            )
             return payload
         payload = dict(base)
         payload.update({"available": True, item_key: items})
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1)
         return payload
 
     def _safe_dict_payload(self, loader, base: dict) -> dict:
@@ -82,15 +89,228 @@ class ASharesSkill:
         except Exception as exc:
             payload = dict(base)
             payload.update({"available": False, "error": str(exc)})
+            payload["data_quality"] = self._build_data_quality(
+                available=False,
+                errors=[str(exc)],
+                source_count=1,
+            )
             return payload
         if isinstance(data, dict):
             payload = dict(base)
             payload.update(data)
             payload["available"] = True
+            payload["data_quality"] = self._build_data_quality(
+                available=True,
+                source_count=1,
+                degraded_reasons=list(payload.get("degraded_reasons", []) or []),
+                errors=list(payload.get("errors", []) or []),
+            )
             return payload
         payload = dict(base)
         payload.update({"available": True, "data": data})
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1)
         return payload
+
+    def _infer_freshness(self) -> str:
+        if "fixture" in self.provider.source_name:
+            return "fixture"
+        if "live" in self.provider.source_name:
+            return "realtime"
+        return "mixed"
+
+    def _build_data_quality(
+        self,
+        *,
+        available: bool,
+        source_count: int,
+        degraded_reasons: list[str] | None = None,
+        errors: list[str] | None = None,
+        fallback_used: bool = False,
+        freshness: str | None = None,
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        issues = [item for item in (degraded_reasons or []) if item]
+        error_items = [item for item in (errors or []) if item]
+        component_items = list(components or [])
+        score = 100
+        if not available:
+            score -= 45
+        score -= min(len(issues) * 8, 24)
+        score -= min(len(error_items) * 12, 36)
+        if fallback_used:
+            score -= 10
+        if freshness == "fixture":
+            score -= 15
+        failed_components = [item.get("name", "") for item in component_items if item.get("available") is False]
+        degraded_components = [item.get("name", "") for item in component_items if item.get("degraded")]
+        score -= min(len(failed_components) * 6, 24)
+        score -= min(len(degraded_components) * 4, 16)
+        score = max(0, min(100, score))
+        if not available:
+            status = "unavailable"
+        elif score >= 85:
+            status = "healthy"
+        elif score >= 65:
+            status = "degraded"
+        else:
+            status = "fragile"
+        return {
+            "status": status,
+            "health_score": score,
+            "freshness": freshness or self._infer_freshness(),
+            "source_count": max(int(source_count), 1),
+            "fallback_used": fallback_used,
+            "issues": issues,
+            "errors": error_items,
+            "failed_components": [item for item in failed_components if item],
+            "degraded_components": [item for item in degraded_components if item],
+        }
+
+    def _experience_context(
+        self,
+        *,
+        stock_code: str,
+        sector: str,
+        style: str,
+        setup: str,
+        themes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        memory = self.user_context.load_memory()
+        learning_stats = memory.learning_stats or {}
+        stock_stats = (learning_stats.get("stock_stats") or {}).get(stock_code, {})
+        setup_stats = (learning_stats.get("setup_stats") or {}).get(setup, {})
+        style_stats = (learning_stats.get("style_stats") or {}).get(style, {})
+        sector_stats = (learning_stats.get("sector_stats") or {}).get(sector, {})
+        theme_stats = {
+            theme: (learning_stats.get("theme_stats") or {}).get(theme, {})
+            for theme in (themes or [])
+            if theme
+        }
+        warnings: list[str] = []
+        if setup_stats.get("trade_count", 0) >= 3 and setup_stats.get("win_rate", 1.0) < 0.4:
+            warnings.append(f"{setup} 历史胜率偏低，先降低仓位验证。")
+        if style_stats.get("trade_count", 0) >= 3 and style_stats.get("avg_return_pct", 0.0) < 0:
+            warnings.append(f"{style} 风格历史平均回报偏弱，不要机械套用。")
+        if stock_stats.get("trade_count", 0) >= 2 and stock_stats.get("avg_return_pct", 0.0) < 0:
+            warnings.append("该股历史复盘结果偏弱，优先等待更高确定性信号。")
+        return {
+            "stock": stock_stats,
+            "setup": setup_stats,
+            "style": style_stats,
+            "sector": sector_stats,
+            "themes": theme_stats,
+            "warnings": warnings,
+        }
+
+    def _flagship_workflows(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "market-cycle",
+                "title": "市场环境判断",
+                "why": "先判断今天适合主攻、试仓还是防守。",
+                "best_for": ["市场情绪", "仓位节奏", "盘前判断"],
+                "example": "a-shares-skill market-cycle",
+            },
+            {
+                "id": "leaders",
+                "title": "主线/龙头扫描",
+                "why": "从全市场里识别主线板块、龙头、中军和补涨。",
+                "best_for": ["主线识别", "龙头扫描", "题材梯队"],
+                "example": "a-shares-skill leaders --date 2026-05-28",
+            },
+            {
+                "id": "diagnose",
+                "title": "单票能不能做",
+                "why": "输出单票定位、风险、动作结论和仓位建议。",
+                "best_for": ["能买吗", "风险大吗", "持仓判断"],
+                "example": "a-shares-skill diagnose --code 宁德时代",
+            },
+            {
+                "id": "playbook",
+                "title": "单票执行手册",
+                "why": "把入场、加仓、减仓、离场条件说清楚。",
+                "best_for": ["买卖规则", "执行纪律", "跟踪计划"],
+                "example": "a-shares-skill playbook --code 宁德时代",
+            },
+            {
+                "id": "quick-research",
+                "title": "新标的快速调研",
+                "why": "把估值、题材、资金、公告、社区情绪一次聚合。",
+                "best_for": ["快速研究", "新票扫描", "研究摘要"],
+                "example": "a-shares-skill quick-research --code 寒武纪",
+            },
+            {
+                "id": "theme-research",
+                "title": "主题研究",
+                "why": "适合做某个题材的研报和标的批量扫描。",
+                "best_for": ["题材研究", "主题研报", "批量检索"],
+                "example": "a-shares-skill theme-research --queries 机器人,储能 --channel report --size 5 --supplement-per-stock 2",
+            },
+        ]
+
+    def _summarize_reviews(self, reviews: list[dict[str, Any]]) -> dict[str, Any]:
+        trade_count = len(reviews)
+        win_count = sum(1 for item in reviews if item.get("outcome") == "win")
+        loss_count = sum(1 for item in reviews if item.get("outcome") == "loss")
+        flat_count = sum(1 for item in reviews if item.get("outcome") == "flat")
+        avg_return = round(sum(float(item.get("return_pct", 0) or 0) for item in reviews) / max(trade_count, 1), 2) if reviews else 0.0
+        avg_holding = round(sum(int(item.get("holding_days", 0) or 0) for item in reviews) / max(trade_count, 1), 2) if reviews else 0.0
+        setup_counter = Counter(item.get("setup", "") for item in reviews if item.get("setup"))
+        theme_counter = Counter(theme for item in reviews for theme in item.get("themes", []))
+        losing_notes = [
+            item.get("note", "")
+            for item in reviews
+            if item.get("outcome") == "loss" and item.get("note")
+        ]
+        return {
+            "trade_count": trade_count,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "flat_count": flat_count,
+            "win_rate": round(win_count / max(trade_count, 1), 2) if reviews else 0.0,
+            "avg_return_pct": avg_return,
+            "avg_holding_days": avg_holding,
+            "top_setup": setup_counter.most_common(1)[0][0] if setup_counter else "",
+            "top_theme": theme_counter.most_common(1)[0][0] if theme_counter else "",
+            "losing_notes": losing_notes[:5],
+        }
+
+    def _review_recommendations(self, reviews: list[dict[str, Any]], learning_stats: dict[str, Any]) -> list[str]:
+        summary = self._summarize_reviews(reviews)
+        setup_stats = dict((learning_stats or {}).get("setup_stats", {}) or {})
+        style_stats = dict((learning_stats or {}).get("style_stats", {}) or {})
+        sector_stats = dict((learning_stats or {}).get("sector_stats", {}) or {})
+        suggestions: list[str] = []
+        if summary["trade_count"] == 0:
+            return ["当前还没有复盘数据，先用 review-trade 积累样本。"]
+        if summary["win_rate"] < 0.45:
+            suggestions.append("整体胜率偏低，下一阶段先缩仓，只做最熟悉的 setup。")
+        if summary["avg_return_pct"] < 0:
+            suggestions.append("平均收益为负，优先减少低确定性试错，先修正执行纪律。")
+        strong_setup = max(
+            setup_stats.items(),
+            key=lambda item: (item[1].get("win_rate", 0), item[1].get("avg_return_pct", 0)),
+            default=("", {}),
+        )
+        weak_style = min(
+            style_stats.items(),
+            key=lambda item: (item[1].get("win_rate", 1), item[1].get("avg_return_pct", 0)),
+            default=("", {}),
+        )
+        best_sector = max(
+            sector_stats.items(),
+            key=lambda item: (item[1].get("avg_return_pct", 0), item[1].get("win_rate", 0)),
+            default=("", {}),
+        )
+        if strong_setup[0]:
+            suggestions.append(f"优先保留 {strong_setup[0]}，它是当前最优 setup。")
+        if weak_style[0]:
+            suggestions.append(f"减少 {weak_style[0]} 风格暴露，历史表现最弱。")
+        if best_sector[0]:
+            suggestions.append(f"后续优先关注 {best_sector[0]}，当前经验收益最好。")
+        if summary["losing_notes"]:
+            suggestions.append(f"最近亏损高频问题：{'；'.join(summary['losing_notes'][:2])}")
+        return suggestions[:6]
 
     def _resolve_stock_input(self, stock_identifier: str) -> dict[str, str]:
         return self.provider.resolve_stock_identifier(stock_identifier)
@@ -219,9 +439,10 @@ class ASharesSkill:
 
     def user_profile(self) -> dict:
         preferences = self.user_context.load_preferences().to_dict()
-        memory = self.user_context.load_memory().to_dict()
+        memory = self._user_context_payload().get("memory", {})
         payload = self._workflow_meta("profile-show", {})
         payload.update({"preferences": preferences, "memory": memory})
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="memory")
         return payload
 
     def update_user_profile(
@@ -246,11 +467,13 @@ class ASharesSkill:
         ).to_dict()
         payload = self._workflow_meta("profile-set", {})
         payload.update({"preferences": preferences})
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="memory")
         return payload
 
     def user_memory(self, stock_code: str | None = None) -> dict:
         payload = self._workflow_meta("memory-show", {"stock_code": stock_code} if stock_code else {})
         payload.update(self._user_context_payload(stock_code))
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="memory")
         return payload
 
     def add_memory_note(self, stock_code: str, note: str) -> dict:
@@ -260,6 +483,7 @@ class ASharesSkill:
         payload = self._workflow_meta("memory-note", {"stock_code": stock_code, "note": note})
         payload.update(self._resolved_stock_meta(resolved))
         payload["memory"] = memory
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="memory")
         return payload
 
     def clear_memory(self, stock_code: str | None = None) -> dict:
@@ -272,6 +496,194 @@ class ASharesSkill:
         payload = self._workflow_meta("memory-clear", {"stock_code": stock_code} if stock_code else {})
         payload.update(resolved_meta)
         payload["memory"] = memory
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="memory")
+        return payload
+
+    def flagship_overview(self) -> dict:
+        payload = self._workflow_meta("flagship", {})
+        workflows = self._flagship_workflows()
+        payload.update(
+            {
+                "flagship_workflows": workflows,
+                "recommended_sequences": [
+                    {
+                        "intent": "今天能不能做",
+                        "steps": ["market-cycle", "leaders"],
+                    },
+                    {
+                        "intent": "这只票能买吗",
+                        "steps": ["market-cycle", "diagnose", "playbook"],
+                    },
+                    {
+                        "intent": "快速研究一个新标的",
+                        "steps": ["market-cycle", "quick-research"],
+                    },
+                    {
+                        "intent": "做一个题材研究",
+                        "steps": ["leaders", "theme-research"],
+                    },
+                    {
+                        "intent": "交易后复盘进化",
+                        "steps": ["review-trade", "weekly-review", "memory-feedback"],
+                    },
+                ],
+                "summary": {
+                    "primary_count": len(workflows),
+                    "top_entry": "market-cycle -> leaders -> diagnose -> playbook",
+                },
+            }
+        )
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="product")
+        return payload
+
+    def review_trade(
+        self,
+        stock_code: str,
+        *,
+        outcome: str,
+        return_pct: float,
+        holding_days: int = 1,
+        theme: str | None = None,
+        note: str | None = None,
+    ) -> dict:
+        resolved = self._resolve_stock_input(stock_code)
+        stock_code = resolved["code"]
+        stock_profile = self.user_context.load_memory().stock_profiles.get(stock_code, {})
+        stock_name = resolved.get("name", "") or stock_profile.get("stock_name", "")
+        sector = stock_profile.get("sector", "")
+        style = stock_profile.get("last_style", "")
+        setup = stock_profile.get("last_setup", "")
+        themes = [theme] if theme else list((stock_profile.get("theme_links") or {}).keys())[:3]
+        memory = self.user_context.record_trade_feedback(
+            stock_code,
+            stock_name=stock_name,
+            sector=sector,
+            style=style,
+            setup=setup,
+            themes=themes,
+            outcome=outcome,
+            return_pct=return_pct,
+            holding_days=holding_days,
+            note=note or "",
+        ).to_dict()
+        payload = self._workflow_meta(
+            "review-trade",
+            {
+                "stock_code": stock_code,
+                "stock_query": resolved["query"],
+                "outcome": outcome,
+                "return_pct": return_pct,
+                "holding_days": holding_days,
+                "theme": theme,
+            },
+        )
+        payload.update(self._resolved_stock_meta(resolved))
+        payload["review"] = {
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "sector": sector,
+            "style": style,
+            "setup": setup,
+            "themes": themes,
+            "outcome": outcome,
+            "return_pct": round(float(return_pct), 2),
+            "holding_days": max(int(holding_days or 1), 1),
+            "note": note or "",
+        }
+        payload["memory"] = memory
+        payload["learning_summary"] = memory.get("learning_stats", {}).get("summary", {})
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=1, freshness="user-feedback")
+        self._remember("review-trade", stock_code=stock_code, stock_name=stock_name, summary=f"{outcome}:{return_pct}%")
+        return payload
+
+    def weekly_review(
+        self,
+        *,
+        limit: int = 20,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict:
+        memory = self.user_context.load_memory()
+        reviews = list(memory.trade_reviews)
+        if start_date or end_date:
+            filtered: list[dict[str, Any]] = []
+            for item in reviews:
+                trade_date = str(item.get("timestamp", ""))[:10]
+                if start_date and trade_date < start_date:
+                    continue
+                if end_date and trade_date > end_date:
+                    continue
+                filtered.append(item)
+            reviews = filtered
+        reviews = reviews[:limit]
+        summary = self._summarize_reviews(reviews)
+        recommendations = self._review_recommendations(reviews, memory.learning_stats)
+        top_winners = sorted(reviews, key=lambda item: float(item.get("return_pct", 0) or 0), reverse=True)[:5]
+        top_losers = sorted(reviews, key=lambda item: float(item.get("return_pct", 0) or 0))[:5]
+        payload = self._workflow_meta(
+            "weekly-review",
+            {"limit": limit, "start_date": start_date, "end_date": end_date},
+            available=True,
+        )
+        payload.update(
+            {
+                "reviews": reviews,
+                "summary": summary,
+                "top_winners": top_winners,
+                "top_losers": top_losers,
+                "recommendations": recommendations,
+                "learning_summary": memory.learning_stats.get("summary", {}),
+                "user_context": self._user_context_payload(),
+            }
+        )
+        self.user_context.record_review_cycle(
+            cycle_type="weekly-review",
+            start_date=start_date,
+            end_date=end_date,
+            summary=summary,
+            recommendations=recommendations,
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=1,
+            freshness="memory",
+            degraded_reasons=[] if reviews else ["empty_review_history"],
+        )
+        self._remember("weekly-review", summary=f"{summary['trade_count']} trades")
+        return payload
+
+    def memory_feedback(self, *, limit: int = 20) -> dict:
+        memory = self.user_context.load_memory()
+        reviews = list(memory.trade_reviews)[:limit]
+        learning_summary = memory.learning_stats.get("summary", {}) if isinstance(memory.learning_stats, dict) else {}
+        suggestions = self._review_recommendations(reviews, memory.learning_stats)
+        highlighted_setups = [learning_summary.get("best_setup", "")]
+        highlighted_themes = [learning_summary.get("strongest_sector", "")]
+        focus = "执行收缩" if learning_summary.get("win_rate", 1.0) < 0.45 else "聚焦高胜率方向"
+        self.user_context.record_feedback_snapshot(
+            focus=focus,
+            suggestions=suggestions,
+            highlighted_setups=highlighted_setups,
+            highlighted_themes=highlighted_themes,
+        )
+        payload = self._workflow_meta("memory-feedback", {"limit": limit}, available=True)
+        payload.update(
+            {
+                "focus": focus,
+                "suggestions": suggestions,
+                "learning_summary": learning_summary,
+                "recent_feedback": self.user_context.load_memory().feedback_snapshots[:10],
+                "review_cycles": self.user_context.load_memory().review_cycles[:10],
+                "user_context": self._user_context_payload(),
+            }
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=1,
+            freshness="memory",
+            degraded_reasons=[] if reviews else ["empty_review_history"],
+        )
+        self._remember("memory-feedback", summary=focus)
         return payload
 
     def diagnose(
@@ -325,6 +737,7 @@ class ASharesSkill:
         stock_snapshot = self.provider.get_stock_snapshot(stock_code)
         trade_setup = payload["strategy_system"]["trade_setup"]
         community = payload["strategy_system"]["community"]
+        themes = [stock_snapshot.sector]
         self._observe_stock_memory(
             stock_code,
             stock_name=resolved.get("name", "") or stock_snapshot.name,
@@ -338,11 +751,11 @@ class ASharesSkill:
             tags=trade_setup.get("tags", []),
             catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
             notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
-            themes=[stock_snapshot.sector],
+            themes=themes,
             summary=payload["conclusion"].get("summary", ""),
         )
         self._observe_themes(
-            [stock_snapshot.sector],
+            themes,
             source="diagnose",
             market_stage=trade_setup.get("market_stage", ""),
             community_mood=community.get("mood", ""),
@@ -350,6 +763,23 @@ class ASharesSkill:
             reasons=trade_setup.get("reasons", []),
             linked_tags=trade_setup.get("tags", []),
             summary=payload["conclusion"].get("summary", ""),
+        )
+        payload["experience_context"] = self._experience_context(
+            stock_code=stock_code,
+            sector=stock_snapshot.sector,
+            style=trade_setup.get("style", ""),
+            setup=trade_setup.get("setup", ""),
+            themes=themes,
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=5,
+            components=[
+                {"name": "market_snapshot", "available": True},
+                {"name": "community", "available": community.get("available", True)},
+                {"name": "news", "available": news.get("available", True)},
+                {"name": "announcements", "available": announcements.get("available", True)},
+            ],
         )
         self._remember(
             "diagnose",
@@ -370,6 +800,7 @@ class ASharesSkill:
         payload["evidence_plan"] = time_context["evidence_plan"]
         payload["user_context"] = self._user_context_payload(stock_code)
         payload.update(self._resolved_stock_meta(resolved))
+        payload["data_quality"] = self._build_data_quality(available=True, source_count=2)
         self._remember("risk", stock_code=stock_code, stock_name=resolved.get("name", ""), summary=payload["risk_level"])
         return payload
 
@@ -434,6 +865,7 @@ class ASharesSkill:
         telegraph = self.market_telegraph(evidence_plan["telegraph"]["page_size"])
         hot_stocks = self.hot_stocks(evidence_plan["hot_stocks"]["trade_date"], evidence_plan["hot_stocks"]["page_size"])
         northbound = self.northbound_flow(evidence_plan["northbound"]["history_days"])
+        leaders_scan = self.analyzer.scan_market_leaders(observe_date)
         payload = self._workflow_meta("market-cycle", {"date": observe_date})
         payload.update(
             {
@@ -456,12 +888,15 @@ class ASharesSkill:
                     "hot_stocks": hot_stocks.get("items", []),
                     "northbound": northbound.get("history", []),
                 },
+                "leaders_scan": leaders_scan,
                 "playbook": playbook,
                 "summary": {
                     "stage": playbook["stage"],
                     "environment": playbook["environment"],
                     "position_upper_bound": playbook["position_upper_bound"],
                     "community_mood": community.get("mood", "未知"),
+                    "top_mainline": leaders_scan.get("summary", {}).get("top_mainline", ""),
+                    "top_leader": leaders_scan.get("summary", {}).get("top_leader", ""),
                 },
             }
         )
@@ -476,7 +911,44 @@ class ASharesSkill:
             heat_score=community.get("heat_score"),
             summary=playbook.get("focus", ""),
         )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=5,
+            components=[
+                {"name": "community", "available": community.get("available", True)},
+                {"name": "telegraph", "available": telegraph.get("available", True)},
+                {"name": "hot_stocks", "available": hot_stocks.get("available", True)},
+                {"name": "northbound", "available": northbound.get("available", True)},
+                {"name": "leaders_scan", "available": True},
+            ],
+        )
         self._remember("market-cycle", summary=playbook["stage"])
+        return payload
+
+    def leaders_scan(self, date: str | None = None) -> dict:
+        time_context = self._build_time_context("market-cycle", date)
+        observe_date = time_context["analysis_date"]
+        scan = self.analyzer.scan_market_leaders(observe_date)
+        payload = self._workflow_meta("leaders", {"date": observe_date})
+        payload.update(
+            {
+                "date": observe_date,
+                "time_context": time_context,
+                "user_context": self._user_context_payload(),
+                **scan,
+            }
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=4,
+            components=[
+                {"name": "sector_rankings", "available": True},
+                {"name": "hot_stocks", "available": True},
+                {"name": "candidate_pool", "available": scan.get("coverage", {}).get("candidate_count", 0) > 0},
+                {"name": "community_topics", "available": True},
+            ],
+        )
+        self._remember("leaders", summary=scan.get("summary", {}).get("top_mainline", ""))
         return payload
 
     def strategy_playbook(self, stock_code: str, date: str | None = None) -> dict:
@@ -513,6 +985,7 @@ class ASharesSkill:
         payload.update(self._resolved_stock_meta(resolved))
         stock_snapshot = self.provider.get_stock_snapshot(stock_code)
         community = payload.get("community", {})
+        themes = [stock_snapshot.sector]
         self._observe_stock_memory(
             stock_code,
             stock_name=resolved.get("name", "") or stock_snapshot.name,
@@ -526,8 +999,24 @@ class ASharesSkill:
             tags=playbook["trade_setup"].get("tags", []),
             catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
             notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
-            themes=[stock_snapshot.sector],
+            themes=themes,
             summary=playbook["trade_setup"].get("setup", ""),
+        )
+        payload["experience_context"] = self._experience_context(
+            stock_code=stock_code,
+            sector=stock_snapshot.sector,
+            style=playbook["trade_setup"].get("style", ""),
+            setup=playbook["trade_setup"].get("setup", ""),
+            themes=themes,
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=3,
+            components=[
+                {"name": "community", "available": community.get("available", True)},
+                {"name": "playbook", "available": True},
+                {"name": "stock_snapshot", "available": True},
+            ],
         )
         self._remember("playbook", stock_code=stock_code, stock_name=resolved.get("name", ""), summary=playbook["trade_setup"]["setup"])
         return payload
@@ -856,6 +1345,16 @@ class ASharesSkill:
             }
         )
         payload.update(self._resolved_stock_meta(resolved))
+        payload["data_quality"] = self._build_data_quality(
+            available=bool(quote),
+            source_count=2,
+            degraded_reasons=degraded_reasons,
+            errors=errors,
+            components=[
+                {"name": "quote", "available": quotes_payload.get("available", False)},
+                {"name": "consensus", "available": bool(forecast_rows), "degraded": not bool(forecast_rows)},
+            ],
+        )
         return payload
 
     def compare_valuations(self, stock_codes: list[str]) -> dict:
@@ -973,6 +1472,15 @@ class ASharesSkill:
             },
             }
         )
+        payload["data_quality"] = self._build_data_quality(
+            available=True,
+            source_count=2,
+            degraded_reasons=list(payload.get("degraded_reasons", []) or []),
+            components=[
+                {"name": "iwencai", "available": True, "degraded": not bool(articles)},
+                {"name": "supplements", "available": True, "degraded": not bool(supplements)},
+            ],
+        )
         theme_tokens = []
         for query in queries:
             theme_tokens.extend(token for token in query.replace("，", ",").split(",") if token.strip())
@@ -1083,6 +1591,7 @@ class ASharesSkill:
         )
         payload.update(self._resolved_stock_meta(resolved))
         stock_snapshot = self.provider.get_stock_snapshot(stock_code)
+        themes = [stock_snapshot.sector] + list(concepts.get("concept_tags", []))
         self._observe_stock_memory(
             stock_code,
             stock_name=resolved.get("name", "") or stock_snapshot.name,
@@ -1097,11 +1606,11 @@ class ASharesSkill:
             concept_tags=concepts.get("concept_tags", []),
             catalysts=[stock_snapshot.catalyst] if stock_snapshot.catalyst else [],
             notes=self.user_context.load_memory().stock_notes.get(stock_code, []),
-            themes=[stock_snapshot.sector] + list(concepts.get("concept_tags", [])),
+            themes=themes,
             summary=f"{strategy_setup.get('style', '')} / {community.get('mood', '未知')}",
         )
         self._observe_themes(
-            [stock_snapshot.sector] + list(concepts.get("concept_tags", [])),
+            themes,
             source="quick-research",
             market_stage=market_cycle.get("stage", ""),
             community_mood=community.get("mood", ""),
@@ -1109,6 +1618,27 @@ class ASharesSkill:
             reasons=[strategy_setup.get("setup", ""), market_cycle.get("focus", "")],
             linked_tags=strategy_setup.get("tags", []),
             summary=f"{strategy_setup.get('style', '')} / {community.get('mood', '未知')}",
+        )
+        payload["experience_context"] = self._experience_context(
+            stock_code=stock_code,
+            sector=stock_snapshot.sector,
+            style=strategy_setup.get("style", ""),
+            setup=strategy_setup.get("setup", ""),
+            themes=themes,
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=valuation.get("available", True),
+            source_count=8,
+            degraded_reasons=degraded_reasons,
+            errors=list(valuation.get("errors", [])),
+            components=[
+                {"name": "valuation", "available": valuation.get("available", True), "degraded": valuation.get("degraded", False)},
+                {"name": "reports", "available": reports.get("available", True), "degraded": not bool(reports.get("items"))},
+                {"name": "community", "available": community.get("available", False)},
+                {"name": "fund_flow", "available": fund_flow.get("available", True)},
+                {"name": "dragon_tiger", "available": dragon_tiger.get("available", True)},
+                {"name": "lockup", "available": lockup.get("available", True)},
+            ],
         )
         self._remember(
             "quick-research",
@@ -1410,6 +1940,8 @@ class ASharesSkill:
             degraded_capabilities.extend(["taoguba-hot", "taoguba-sentiment", "taoguba-stock", "taoguba-vip"])
         overall_ok = config_valid and all(check["ok"] for check in checks if check["status"] not in {"warning", "skipped"})
         payload = self._workflow_meta("self-check", {}, available=overall_ok, degraded_reasons=sorted(set(degraded_capabilities)))
+        ok_weight = len([check for check in checks if check["ok"]])
+        health_score = round(ok_weight / max(len(checks), 1) * 100)
         payload.update(
             {
             "config_valid": config_valid,
@@ -1422,19 +1954,31 @@ class ASharesSkill:
                 "mootdx_installed": mootdx_installed,
             },
             "health_checks": checks,
+            "health_summary": {
+                "overall_status": "healthy" if health_score >= 85 and overall_ok else "degraded" if health_score >= 65 else "fragile",
+                "health_score": health_score,
+                "failed_checks": [check["name"] for check in checks if not check["ok"]],
+                "warning_checks": [check["name"] for check in checks if check["status"] == "warning"],
+            },
+            "flagship_workflows": [item["id"] for item in self._flagship_workflows()],
             "recommended_actions": recommendations,
             "supported_scenarios": [
+                "flagship",
                 "profile-show",
                 "profile-set",
                 "memory-show",
                 "memory-note",
                 "memory-clear",
+                "review-trade",
+                "weekly-review",
+                "memory-feedback",
                 "diagnose",
                 "risk",
                 "pick",
                 "pre-market",
                 "post-market",
                 "market-cycle",
+                "leaders",
                 "plan",
                 "playbook",
                 "news",
@@ -1476,5 +2020,12 @@ class ASharesSkill:
             ],
             "sample_stock_codes": candidate_codes,
             }
+        )
+        payload["data_quality"] = self._build_data_quality(
+            available=overall_ok,
+            source_count=4,
+            degraded_reasons=sorted(set(degraded_capabilities)),
+            components=[{"name": check["name"], "available": check["ok"], "degraded": check["status"] == "warning"} for check in checks],
+            freshness="runtime",
         )
         return payload

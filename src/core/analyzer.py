@@ -138,6 +138,207 @@ class IntegratedAnalyzer:
         snapshot = self.provider.get_market_snapshot(date)
         return self.methodology.build_stock_playbook(stock, snapshot)
 
+    def scan_market_leaders(self, date: str | None = None) -> dict:
+        snapshot = self.provider.get_market_snapshot(date)
+        sector_rankings = self.provider.get_sector_rankings(10)
+        hot_stocks = self.provider.get_hot_stocks(date, 20)
+        community = self.analyze_community_sentiment(12)
+
+        candidates: dict[str, dict] = {}
+        for stock in self.provider.list_stock_candidates():
+            profile = self.methodology.evaluate_stock(stock, snapshot)
+            candidates[stock.code] = {
+                "code": stock.code,
+                "name": stock.name,
+                "sector": stock.sector,
+                "price": stock.price,
+                "turnover_million": stock.turnover_million,
+                "momentum_score": stock.momentum_score,
+                "catalyst": stock.catalyst,
+                "style": profile.style,
+                "setup": profile.setup,
+                "methodology_score": profile.methodology_score,
+                "preferred_position": profile.preferred_position,
+                "reasons": list(profile.reasons),
+                "tags": list(profile.tags),
+            }
+
+        for item in hot_stocks:
+            code = str(item.get("code", "")).strip()
+            if not code:
+                continue
+            if code not in candidates:
+                try:
+                    stock = self.provider.get_stock_snapshot(code)
+                    profile = self.methodology.evaluate_stock(stock, snapshot)
+                    candidates[code] = {
+                        "code": stock.code,
+                        "name": stock.name,
+                        "sector": stock.sector,
+                        "price": stock.price,
+                        "turnover_million": stock.turnover_million,
+                        "momentum_score": stock.momentum_score,
+                        "catalyst": stock.catalyst,
+                        "style": profile.style,
+                        "setup": profile.setup,
+                        "methodology_score": profile.methodology_score,
+                        "preferred_position": profile.preferred_position,
+                        "reasons": list(profile.reasons),
+                        "tags": list(profile.tags),
+                    }
+                except Exception:
+                    continue
+            candidates[code]["hot_reason"] = item.get("reason", "")
+            candidates[code]["change_pct"] = float(item.get("change_pct", 0) or 0)
+            candidates[code]["hot_rank_score"] = max(1, 21 - int(item.get("rank", 20) or 20))
+
+        sector_meta = {item.get("name", ""): item for item in sector_rankings.get("top", [])}
+        sector_groups: dict[str, list[dict]] = {}
+        for item in candidates.values():
+            sector_groups.setdefault(item.get("sector", "其他"), []).append(item)
+
+        mainline_sectors: list[dict] = []
+        market_leaders: list[dict] = []
+        trend_cores: list[dict] = []
+        replenishment_watch: list[dict] = []
+        hot_topic_names = {item.get("topic", "") for item in community.get("hot_topics", [])}
+
+        for sector, items in sector_groups.items():
+            ranked = sorted(
+                items,
+                key=lambda entry: (
+                    entry.get("methodology_score", 0),
+                    entry.get("momentum_score", 0),
+                    entry.get("turnover_million", 0),
+                    entry.get("change_pct", 0),
+                    entry.get("hot_rank_score", 0),
+                ),
+                reverse=True,
+            )
+            top_item = ranked[0]
+            ladder = ranked[: min(3, len(ranked))]
+            sector_row = sector_meta.get(sector, {})
+            hot_topic_bonus = 1.0 if sector in hot_topic_names else 0.0
+            sector_heat = round(
+                float(sector_row.get("change_pct", 0) or 0) * 6
+                + top_item.get("methodology_score", 0) * 10
+                + min(len(ranked), 3) * 4
+                + hot_topic_bonus * 8,
+                2,
+            )
+            mainline_sectors.append(
+                {
+                    "sector": sector,
+                    "heat_score": sector_heat,
+                    "change_pct": float(sector_row.get("change_pct", 0) or 0),
+                    "up_count": int(sector_row.get("up_count", 0) or 0),
+                    "down_count": int(sector_row.get("down_count", 0) or 0),
+                    "leader": {
+                        "code": top_item["code"],
+                        "name": top_item["name"],
+                        "style": top_item["style"],
+                        "setup": top_item["setup"],
+                        "methodology_score": top_item["methodology_score"],
+                        "change_pct": top_item.get("change_pct", 0.0),
+                    },
+                    "ladder": [
+                        {
+                            "code": item["code"],
+                            "name": item["name"],
+                            "style": item["style"],
+                            "methodology_score": item["methodology_score"],
+                        }
+                        for item in ladder
+                    ],
+                    "rationale": [
+                        reason
+                        for reason in [
+                            f"板块涨跌幅 {float(sector_row.get('change_pct', 0) or 0)}%",
+                            f"龙头 {top_item['name']} 方法论分 {top_item['methodology_score']}",
+                            top_item.get("hot_reason", ""),
+                        ]
+                        if reason and reason != "板块涨跌幅 0.0%"
+                    ],
+                }
+            )
+            if top_item["style"] == "主线龙头":
+                market_leaders.append(
+                    {
+                        **top_item,
+                        "sector_heat_score": sector_heat,
+                        "sector": sector,
+                    }
+                )
+            elif top_item["style"] == "趋势中军":
+                trend_cores.append(
+                    {
+                        **top_item,
+                        "sector_heat_score": sector_heat,
+                        "sector": sector,
+                    }
+                )
+            else:
+                replenishment_watch.append(
+                    {
+                        **top_item,
+                        "sector_heat_score": sector_heat,
+                        "sector": sector,
+                    }
+                )
+
+        mainline_sectors.sort(key=lambda item: item.get("heat_score", 0), reverse=True)
+        market_leaders.sort(
+            key=lambda item: (
+                item.get("sector_heat_score", 0),
+                item.get("methodology_score", 0),
+                item.get("momentum_score", 0),
+            ),
+            reverse=True,
+        )
+        trend_cores.sort(
+            key=lambda item: (
+                item.get("sector_heat_score", 0),
+                item.get("methodology_score", 0),
+            ),
+            reverse=True,
+        )
+        replenishment_watch.sort(
+            key=lambda item: (
+                item.get("sector_heat_score", 0),
+                item.get("methodology_score", 0),
+            ),
+            reverse=True,
+        )
+        warnings: list[str] = []
+        if not market_leaders:
+            warnings.append("当前没有足够清晰的主线龙头，优先观察而不是强做。")
+        if len(mainline_sectors) <= 1:
+            warnings.append("主线板块集中度较低，注意题材切换风险。")
+        if snapshot.sentiment_score <= 2.6:
+            warnings.append("市场处于弱势环境，龙头扫描结果更适合观察而非重仓执行。")
+
+        return {
+            "date": snapshot.date,
+            "market_cycle": self.methodology.assess_market_cycle(snapshot).to_dict(),
+            "mainline_sectors": mainline_sectors[:5],
+            "market_leaders": market_leaders[:8],
+            "trend_cores": trend_cores[:8],
+            "replenishment_watch": replenishment_watch[:8],
+            "community_topics": community.get("hot_topics", []),
+            "warnings": warnings,
+            "coverage": {
+                "sector_count": len(mainline_sectors),
+                "candidate_count": len(candidates),
+                "leader_count": len(market_leaders),
+                "community_topic_count": len(community.get("hot_topics", [])),
+            },
+            "summary": {
+                "top_mainline": mainline_sectors[0]["sector"] if mainline_sectors else "",
+                "top_leader": market_leaders[0]["name"] if market_leaders else "",
+                "leader_count": len(market_leaders),
+            },
+        }
+
     def check_mandatory_risks(self, stock_code: str) -> dict:
         stock = self.provider.get_stock_snapshot(stock_code)
         risks = []

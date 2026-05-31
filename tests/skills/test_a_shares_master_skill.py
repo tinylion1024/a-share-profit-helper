@@ -79,13 +79,20 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertTrue(payload["config_valid"])
         self.assertEqual(payload["workflow"], "self-check")
         self.assertIn("generated_at", payload)
+        self.assertIn("flagship", payload["supported_scenarios"])
         self.assertIn("diagnose", payload["supported_scenarios"])
         self.assertIn("profile-show", payload["supported_scenarios"])
         self.assertIn("memory-show", payload["supported_scenarios"])
         self.assertIn("market-cycle", payload["supported_scenarios"])
         self.assertIn("playbook", payload["supported_scenarios"])
+        self.assertIn("leaders", payload["supported_scenarios"])
+        self.assertIn("review-trade", payload["supported_scenarios"])
+        self.assertIn("weekly-review", payload["supported_scenarios"])
+        self.assertIn("memory-feedback", payload["supported_scenarios"])
         self.assertIn("news", payload["supported_scenarios"])
         self.assertIn("health_checks", payload)
+        self.assertIn("health_summary", payload)
+        self.assertIn("flagship_workflows", payload)
         self.assertIn("credential_status", payload)
         self.assertIn("dependency_status", payload)
         check_names = {item["name"] for item in payload["health_checks"]}
@@ -180,6 +187,9 @@ class SkillCompatibilityTests(unittest.TestCase):
         market_cycle_args = _apply_runtime_defaults(parser.parse_args(["market-cycle"]))
         self.assertEqual(market_cycle_args.date, shanghai_today_str())
         self.assertTrue(market_cycle_args.date_inferred)
+        leaders_args = _apply_runtime_defaults(parser.parse_args(["leaders"]))
+        self.assertEqual(leaders_args.date, shanghai_today_str())
+        self.assertTrue(leaders_args.date_inferred)
 
     def test_time_context_uses_previous_trade_day_pre_market(self) -> None:
         context = build_intent_time_context(
@@ -279,6 +289,47 @@ class SkillCompatibilityTests(unittest.TestCase):
             self.assertGreaterEqual(full_memory["theme_profiles"]["储能"]["observation_count"], 1)
             self.assertIn("300750", full_memory["theme_profiles"]["储能"]["related_stocks"])
 
+    def test_review_trade_turns_memory_into_experience_learning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_offline_cache_config(temp_dir)
+            skill = ASharesSkill(config=config)
+            skill.quick_research("300750", "2026-05-28")
+            payload = skill.review_trade(
+                "300750",
+                outcome="win",
+                return_pct=12.5,
+                holding_days=4,
+                theme="储能",
+                note="分歧低吸后趋势延续",
+            )
+            learning = payload["learning_summary"]
+            self.assertEqual(learning["trade_count"], 1)
+            self.assertEqual(learning["win_rate"], 1.0)
+            memory = skill.user_memory("300750")["memory"]
+            self.assertEqual(memory["learning_stats"]["overall"]["trade_count"], 1)
+            self.assertEqual(memory["learning_stats"]["setup_stats"]["趋势跟随"]["trade_count"], 1)
+            self.assertEqual(memory["learning_stats"]["theme_stats"]["储能"]["trade_count"], 1)
+            self.assertEqual(memory["stock_profiles"]["300750"]["last_review_outcome"], "win")
+
+    def test_weekly_review_and_memory_feedback_close_the_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_offline_cache_config(temp_dir)
+            skill = ASharesSkill(config=config)
+            skill.quick_research("300750", "2026-05-28")
+            skill.review_trade("300750", outcome="win", return_pct=8.5, holding_days=3, theme="储能", note="低吸有效")
+            skill.review_trade("300750", outcome="loss", return_pct=-4.0, holding_days=2, theme="储能", note="追高失败")
+            weekly = skill.weekly_review(limit=10)
+            feedback = skill.memory_feedback(limit=10)
+
+            self.assertEqual(weekly["workflow"], "weekly-review")
+            self.assertEqual(weekly["summary"]["trade_count"], 2)
+            self.assertTrue(weekly["recommendations"])
+            self.assertEqual(feedback["workflow"], "memory-feedback")
+            self.assertTrue(feedback["suggestions"])
+            memory = skill.user_profile()["memory"]
+            self.assertTrue(memory["review_cycles"])
+            self.assertTrue(memory["feedback_snapshots"])
+
     def test_full_stack_skill_endpoints_work_in_offline_mode(self) -> None:
         skill = ASharesSkill(config=make_offline_config())
         picks = skill.pick(["basic", "tech"])
@@ -307,18 +358,25 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertEqual(skill.stock_info("300750")["code"], "300750")
         self.assertTrue(skill.realtime_quotes(["300750", "000300", "510300"])["items"])
         market_cycle = skill.market_cycle_report("2026-05-28")
+        leaders = skill.leaders_scan("2026-05-28")
         playbook = skill.strategy_playbook("300750", "2026-05-28")
         valuation = skill.valuation("300750")
         self.assertEqual(valuation["stock_code"], "300750")
         self.assertEqual(valuation["workflow"], "valuation")
         self.assertIn("coverage", valuation)
+        self.assertIn("data_quality", valuation)
         self.assertTrue(skill.compare_valuations(["300750", "002594"])["items"])
         self.assertEqual(market_cycle["workflow"], "market-cycle")
+        self.assertEqual(leaders["workflow"], "leaders")
         self.assertEqual(playbook["workflow"], "playbook")
         self.assertIn("buy_strategy", market_cycle["playbook"])
         self.assertIn("community", market_cycle)
+        self.assertIn("leaders_scan", market_cycle)
         self.assertIn("time_context", market_cycle)
         self.assertIn("evidence_plan", market_cycle)
+        self.assertIn("mainline_sectors", leaders)
+        self.assertIn("market_leaders", leaders)
+        self.assertTrue(leaders["data_quality"]["health_score"] >= 0)
         self.assertIn("entry_signals", playbook["playbook"])
         self.assertTrue(picks)
         self.assertIn("methodology_score", picks[0])
@@ -335,6 +393,8 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertIn("summary", research)
         self.assertIn("strategy_system", research)
         self.assertIn("community", research)
+        self.assertIn("experience_context", research)
+        self.assertIn("data_quality", research)
         self.assertIn("time_context", research)
         self.assertIn("evidence_plan", research)
         self.assertTrue(skill.price_bars("300750", 4, 3)["items"])
@@ -572,6 +632,138 @@ class SkillCompatibilityTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["workflow"], "market-cycle")
         self.assertIn("playbook", payload)
+
+    def test_run_skill_cli_supports_leaders_and_review_trade_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "A_SHARE_SKILL_OFFLINE_MODE": "true",
+                "DATA_CACHE_DIR": temp_dir,
+            }
+            leaders_result = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "leaders", "--date", "2026-05-28"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            leaders_payload = json.loads(leaders_result.stdout)
+            self.assertEqual(leaders_payload["workflow"], "leaders")
+            self.assertIn("mainline_sectors", leaders_payload)
+
+            subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "quick-research", "--code", "300750", "--date", "2026-05-28"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            review_result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/run_skill.py",
+                    "--format",
+                    "json",
+                    "review-trade",
+                    "--code",
+                    "300750",
+                    "--outcome",
+                    "win",
+                    "--return-pct",
+                    "8.5",
+                    "--holding-days",
+                    "3",
+                    "--theme",
+                    "储能",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            review_payload = json.loads(review_result.stdout)
+            self.assertEqual(review_payload["workflow"], "review-trade")
+            self.assertEqual(review_payload["learning_summary"]["trade_count"], 1)
+
+    def test_run_skill_cli_supports_flagship_and_review_loop_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "A_SHARE_SKILL_OFFLINE_MODE": "true",
+                "DATA_CACHE_DIR": temp_dir,
+            }
+            flagship_result = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "flagship"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            flagship_payload = json.loads(flagship_result.stdout)
+            self.assertEqual(flagship_payload["workflow"], "flagship")
+            self.assertTrue(flagship_payload["flagship_workflows"])
+
+            subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "quick-research", "--code", "300750", "--date", "2026-05-28"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/run_skill.py",
+                    "--format",
+                    "json",
+                    "review-trade",
+                    "--code",
+                    "300750",
+                    "--outcome",
+                    "win",
+                    "--return-pct",
+                    "8.5",
+                    "--holding-days",
+                    "3",
+                    "--theme",
+                    "储能",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            weekly_result = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "weekly-review", "--limit", "5"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            weekly_payload = json.loads(weekly_result.stdout)
+            self.assertEqual(weekly_payload["workflow"], "weekly-review")
+            self.assertEqual(weekly_payload["summary"]["trade_count"], 1)
+
+            feedback_result = subprocess.run(
+                [sys.executable, "scripts/run_skill.py", "--format", "json", "memory-feedback", "--limit", "5"],
+                cwd=REPO_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            feedback_payload = json.loads(feedback_result.stdout)
+            self.assertEqual(feedback_payload["workflow"], "memory-feedback")
+            self.assertTrue(feedback_payload["suggestions"])
 
     def test_run_skill_cli_supports_profile_and_memory_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -880,6 +1072,8 @@ class SkillCompatibilityTests(unittest.TestCase):
         self.assertIn("valuation", payload["degraded_reasons"])
         self.assertTrue(payload["recommended_actions"])
         self.assertEqual(payload["sample_stock_codes"][0], "300750")
+        self.assertIn("health_summary", payload)
+        self.assertIn("data_quality", payload)
 
     def test_skill_frontmatter_is_agent_friendly(self) -> None:
         text = (REPO_ROOT / "SKILL.md").read_text(encoding="utf-8")

@@ -14,10 +14,12 @@ from src.cli import (
     render_dragon_tiger,
     render_f10_profile,
     render_financial_snapshot,
+    render_flagship,
     render_fund_flow,
     render_hot_stocks,
     render_iwencai,
     render_json,
+    render_leaders,
     render_lockup,
     render_market_cycle,
     render_news,
@@ -30,8 +32,10 @@ from src.cli import (
     render_quick_research,
     render_quotes,
     render_reports,
+    render_review_cycle,
     render_risk_report,
     render_rows,
+    render_review_trade,
     render_sector_rankings,
     render_stock_info,
     render_stock_picker,
@@ -67,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("self-check", help="检查 Skill 是否可运行")
+    subparsers.add_parser("flagship", help="查看当前对外主打能力和推荐使用路径")
     subparsers.add_parser("profile-show", help="查看用户偏好和记忆摘要")
 
     profile_set = subparsers.add_parser("profile-set", help="设置用户偏好")
@@ -87,6 +92,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     memory_clear = subparsers.add_parser("memory-clear", help="清理用户记忆")
     memory_clear.add_argument("--code", help="仅清理某只股票的记忆")
+
+    review_trade = subparsers.add_parser("review-trade", help="记录交易复盘，沉淀经验学习")
+    review_trade.add_argument("--code", required=True, help="股票代码或简称")
+    review_trade.add_argument("--outcome", required=True, choices=["win", "loss", "flat"], help="复盘结果")
+    review_trade.add_argument("--return-pct", required=True, type=float, help="收益率，单位百分比")
+    review_trade.add_argument("--holding-days", type=int, default=1, help="持有天数")
+    review_trade.add_argument("--theme", help="关联题材")
+    review_trade.add_argument("--note", help="复盘备注")
+
+    weekly_review = subparsers.add_parser("weekly-review", help="周期复盘，总结最近交易表现")
+    weekly_review.add_argument("--limit", type=int, default=20, help="最近复盘条数")
+    weekly_review.add_argument("--start-date", help="开始日期 YYYY-MM-DD")
+    weekly_review.add_argument("--end-date", help="结束日期 YYYY-MM-DD")
+
+    memory_feedback = subparsers.add_parser("memory-feedback", help="把复盘结果转成下一阶段的记忆反馈")
+    memory_feedback.add_argument("--limit", type=int, default=20, help="回看复盘条数")
 
     risk = subparsers.add_parser("risk", help="风险扫描")
     risk.add_argument("--code", required=True, help="股票代码或简称")
@@ -110,6 +131,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     market_cycle = subparsers.add_parser("market-cycle", help="方法论市场周期判断")
     market_cycle.add_argument("--date", help="日期 (YYYY-MM-DD)")
+
+    leaders = subparsers.add_parser("leaders", help="全市场主线/龙头扫描")
+    leaders.add_argument("--date", help="日期 (YYYY-MM-DD)")
 
     plan = subparsers.add_parser("plan", help="交易计划")
     plan.add_argument("--code", required=True, help="股票代码或简称")
@@ -268,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _apply_runtime_defaults(args: argparse.Namespace) -> argparse.Namespace:
     today = shanghai_today_str()
     args.date_inferred = False
-    if args.command in {"pre-market", "post-market", "market-cycle", "plan", "playbook", "dragon-tiger", "daily-dragon-tiger", "lockup", "quick-research"} and not getattr(args, "date", None):
+    if args.command in {"pre-market", "post-market", "market-cycle", "leaders", "plan", "playbook", "dragon-tiger", "daily-dragon-tiger", "lockup", "quick-research"} and not getattr(args, "date", None):
         args.date = today
         args.date_inferred = True
     return args
@@ -282,6 +306,11 @@ def main() -> None:
     if args.command == "self-check":
         payload = skill.self_check()
         print(render_json(payload) if args.format == "json" else render_json(payload))
+        return
+
+    if args.command == "flagship":
+        payload = skill.flagship_overview()
+        print(render_json(payload) if args.format == "json" else render_flagship(payload))
         return
 
     if args.command == "profile-show":
@@ -317,6 +346,28 @@ def main() -> None:
         print(render_json(payload) if args.format == "json" else render_user_memory(payload))
         return
 
+    if args.command == "review-trade":
+        payload = skill.review_trade(
+            args.code,
+            outcome=args.outcome,
+            return_pct=args.return_pct,
+            holding_days=args.holding_days,
+            theme=args.theme,
+            note=args.note,
+        )
+        print(render_json(payload) if args.format == "json" else render_review_trade(payload))
+        return
+
+    if args.command == "weekly-review":
+        payload = skill.weekly_review(limit=args.limit, start_date=args.start_date, end_date=args.end_date)
+        print(render_json(payload) if args.format == "json" else render_review_cycle(payload))
+        return
+
+    if args.command == "memory-feedback":
+        payload = skill.memory_feedback(limit=args.limit)
+        print(render_json(payload) if args.format == "json" else render_review_cycle(payload))
+        return
+
     if args.command == "risk":
         payload = skill.risk(args.code, args.date)
         print(render_json(payload) if args.format == "json" else render_risk_report(payload))
@@ -346,6 +397,11 @@ def main() -> None:
     if args.command == "market-cycle":
         payload = skill.market_cycle_report(None if getattr(args, "date_inferred", False) else args.date)
         print(render_json(payload) if args.format == "json" else render_market_cycle(payload))
+        return
+
+    if args.command == "leaders":
+        payload = skill.leaders_scan(None if getattr(args, "date_inferred", False) else args.date)
+        print(render_json(payload) if args.format == "json" else render_leaders(payload))
         return
 
     if args.command == "plan":

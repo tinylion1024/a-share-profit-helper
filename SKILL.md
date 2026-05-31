@@ -16,7 +16,7 @@ metadata: {"openclaw":{"emoji":"📈","homepage":"https://github.com/tinylion102
 
 This skill uses the latest trusted online A-share data by default, then converts it into `诊股` / `选股` / `风控` / `盘前盘后复盘` / `市场周期判断` / `方法论执行手册` / `新闻` / `公告` / `资金流` / `行业轮动` / `热点强势股` / `淘股吧热点` / `淘股吧舆情` / `淘股吧个股情绪` / `淘股吧大V观点` / `概念板块` / `研报` / `龙虎榜` / `融资融券` / `大宗交易` / `股东户数` / `分红` / `解禁` / `北向资金` / `个股信息` / `批量实时行情` / `K线` / `五档盘口` / `逐笔成交` / `季报快照` / `F10 公司资料` / `财报三表` / `一致预期` / `估值` / `批量对比` / `主题研报批量检索` / `快速调研` / `iwencai 检索` output. Local fixtures remain available only for tests or controlled fallback.
 
-The three flagship workflows, `valuation`, `quick-research`, and `theme-research`, now share a common machine-friendly envelope with `workflow`, `generated_at`, `input`, `degraded`, `errors`, `coverage`, and `summary`. `self-check` also reports dependency state, credential state, capability checks, and recommended actions.
+The six flagship workflows are now `market-cycle`, `leaders`, `diagnose`, `playbook`, `quick-research`, and `theme-research`. They are the preferred external entrypoints. `valuation`, `reports`, `fund-flow`, `taoguba-*`, and the rest remain available as supporting tools behind those flagship workflows. `self-check` also reports dependency state, credential state, capability checks, flagship workflows, and health summary.
 
 ## When To Use
 
@@ -47,14 +47,19 @@ a-shares-skill valuation --code 300750
 
 # Repository mode
 python3 scripts/run_skill.py self-check
+python3 scripts/run_skill.py flagship
 python3 scripts/run_skill.py risk --code 300750
 python3 scripts/run_skill.py diagnose --code 300750 --date 2026-05-28
 python3 scripts/run_skill.py pick --filters basic,tech,catalyst
 python3 scripts/run_skill.py market-cycle --date 2026-05-28
+python3 scripts/run_skill.py leaders --date 2026-05-28
 python3 scripts/run_skill.py pre-market --date 2026-05-28
 python3 scripts/run_skill.py post-market --date 2026-05-28
 python3 scripts/run_skill.py plan --code 300750 --date 2026-05-28
 python3 scripts/run_skill.py playbook --code 300750 --date 2026-05-28
+python3 scripts/run_skill.py review-trade --code 300750 --outcome win --return-pct 8.5 --holding-days 3 --theme 储能
+python3 scripts/run_skill.py weekly-review --limit 10
+python3 scripts/run_skill.py memory-feedback --limit 10
 python3 scripts/run_skill.py news --code 300750 --page-size 3
 python3 scripts/run_skill.py telegraph --page-size 5
 python3 scripts/run_skill.py global-news --page-size 5
@@ -130,6 +135,8 @@ Examples:
 
 - `今天市场情绪怎么样，适合进攻还是防守？`
   Run `market-cycle`.
+- `今天主线和龙头是谁？`
+  Run `leaders`.
 - `宁德时代能买吗？给我买卖建议。`
   Run `diagnose`, and use `playbook` if the user also wants entry/add/reduce/exit rules.
 - `帮我看一下比亚迪风险大不大。`
@@ -146,33 +153,40 @@ Examples:
   Run `theme-research`.
 - `帮我快速研究一下寒武纪。`
   Run `quick-research`.
+- `帮我复盘最近交易，看看我适合什么 setup。`
+  Run `weekly-review`, then `memory-feedback`.
 
 ## Procedure
 
 1. Run `python3 scripts/run_skill.py self-check` before using live scenarios.
-2. If the user asks for 风控 only, call `risk`.
-3. If the user asks for 买/卖/持建议, call `diagnose`.
-4. If the user asks for what to buy, call `pick`.
-5. If the user asks for市场情绪阶段、仓位节奏 or 主攻/防守判断, call `market-cycle`.
-6. If the user needs single-stock entry/add/reduce/exit rules, call `playbook`.
-7. If the user needs actionable prices and position sizing, call `plan`.
-8. If the user asks for event flow, call `news`, `telegraph`, `global-news`, or `announcements`.
-9. If the user asks for资金面 or 行业轮动, call `fund-flow` or `sectors`.
-10. If the user asks for强势股归因 or 题材热点, call `hot-stocks`.
-11. If the user asks for淘股吧热点、大V观点、市场舆情 or 个股股民情绪, call `taoguba-hot`, `taoguba-sentiment`, `taoguba-stock`, or `taoguba-vip`.
-12. If the user asks for个股所属概念、概念标签 or 题材归属, call `concept-blocks`.
-13. If the user asks for卖方观点 or 机构覆盖, call `reports`.
-14. If the user asks for席位资金、连板观察 or 全市场龙虎榜, call `dragon-tiger` or `daily-dragon-tiger`.
-15. If the user asks for两融、筹码集中、大宗成交、分红回报 or 解禁预警, call `margin`, `holders`, `block-trades`, `dividends`, or `lockup`.
-16. If the user asks for指数、ETF or 批量实时行情, call `quotes`.
-17. If the user asks for个股估值、PEG、PE消化 or 批量估值对比, call `valuation` or `compare`.
-18. If the user asks for主题研报聚合、跨主题研报批量检索 or 主题补充研报, call `theme-research`.
-19. If the user asks for新标的快速调研, call `quick-research`.
-20. If the user asks for个股K线、五档盘口 or 逐笔成交, call `kline`, `order-book`, or `transactions`.
-21. If the user asks for北向资金、个股基本面、季报快照、F10资料、财务报表 or 一致预期, call `northbound`, `stock-info`, `quarterly-snapshot`, `f10`, `finance`, or `consensus-eps`.
-22. If the user asks for跨主题语义检索 or 结构化问财查询, call `iwencai-search` or `iwencai-query`.
-23. Use `--format json` when another agent or tool will parse the output.
-24. If live data is unavailable, fail clearly unless the caller explicitly enabled offline fallback.
+2. Prefer the flagship workflows first: `market-cycle`, `leaders`, `diagnose`, `playbook`, `quick-research`, `theme-research`.
+3. If the user asks for 风控 only, call `risk`.
+4. If the user asks for 买/卖/持建议, call `diagnose`.
+5. If the user asks for what to buy, call `pick`.
+6. If the user asks for市场情绪阶段、仓位节奏 or 主攻/防守判断, call `market-cycle`.
+7. If the user asks for主线、龙头 or 题材梯队, call `leaders`.
+8. If the user needs single-stock entry/add/reduce/exit rules, call `playbook`.
+9. If the user needs actionable prices and position sizing, call `plan`.
+10. If the user asks for event flow, call `news`, `telegraph`, `global-news`, or `announcements`.
+11. If the user asks for资金面 or 行业轮动, call `fund-flow` or `sectors`.
+12. If the user asks for强势股归因 or 题材热点, call `hot-stocks`.
+13. If the user asks for淘股吧热点、大V观点、市场舆情 or 个股股民情绪, call `taoguba-hot`, `taoguba-sentiment`, `taoguba-stock`, or `taoguba-vip`.
+14. If the user asks for个股所属概念、概念标签 or 题材归属, call `concept-blocks`.
+15. If the user asks for卖方观点 or 机构覆盖, call `reports`.
+16. If the user asks for席位资金、连板观察 or 全市场龙虎榜, call `dragon-tiger` or `daily-dragon-tiger`.
+17. If the user asks for两融、筹码集中、大宗成交、分红回报 or 解禁预警, call `margin`, `holders`, `block-trades`, `dividends`, or `lockup`.
+18. If the user asks for指数、ETF or 批量实时行情, call `quotes`.
+19. If the user asks for个股估值、PEG、PE消化 or 批量估值对比, call `valuation` or `compare`.
+20. If the user asks for主题研报聚合、跨主题研报批量检索 or 主题补充研报, call `theme-research`.
+21. If the user asks for新标的快速调研, call `quick-research`.
+22. If the user asks for交易后复盘, call `review-trade`.
+23. If the user asks for周期复盘总结, call `weekly-review`.
+24. If the user asks for把复盘结果转成下一阶段建议, call `memory-feedback`.
+25. If the user asks for个股K线、五档盘口 or 逐笔成交, call `kline`, `order-book`, or `transactions`.
+26. If the user asks for北向资金、个股基本面、季报快照、F10资料、财务报表 or 一致预期, call `northbound`, `stock-info`, `quarterly-snapshot`, `f10`, `finance`, or `consensus-eps`.
+27. If the user asks for跨主题语义检索 or 结构化问财查询, call `iwencai-search` or `iwencai-query`.
+28. Use `--format json` when another agent or tool will parse the output.
+29. If live data is unavailable, fail clearly unless the caller explicitly enabled offline fallback.
 
 ## Pitfalls
 

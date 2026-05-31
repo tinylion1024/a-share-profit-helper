@@ -66,6 +66,37 @@ def render_stock_picker(candidates: list[dict], filters: list[str]) -> str:
     return "\n".join(lines)
 
 
+def render_data_quality(payload: dict) -> list[str]:
+    quality = payload.get("data_quality", {})
+    if not quality:
+        return []
+    lines = [
+        f"- 数据质量: {quality.get('status', '-')}",
+        f"- 健康分: {quality.get('health_score', '-')}",
+        f"- 新鲜度: {quality.get('freshness', '-')}",
+        f"- 数据源数量: {quality.get('source_count', '-')}",
+    ]
+    if quality.get("issues"):
+        lines.append(f"- 数据问题: {', '.join(quality.get('issues', []))}")
+    if quality.get("failed_components"):
+        lines.append(f"- 失败组件: {', '.join(quality.get('failed_components', []))}")
+    return lines
+
+
+def render_flagship(payload: dict) -> str:
+    lines = ["# 主打能力", ""]
+    lines.extend(render_data_quality(payload))
+    lines.append("")
+    lines.append("## 旗舰工作流")
+    for item in payload.get("flagship_workflows", []):
+        lines.append(f"- {item.get('id', '')} | {item.get('title', '')} | {item.get('why', '')}")
+    lines.append("")
+    lines.append("## 推荐路径")
+    for item in payload.get("recommended_sequences", []):
+        lines.append(f"- {item.get('intent', '')}: {' -> '.join(item.get('steps', []))}")
+    return "\n".join(lines)
+
+
 def render_diagnosis(payload: dict) -> str:
     rating = payload["rating_4d"]
     conclusion = payload["conclusion"]
@@ -73,25 +104,34 @@ def render_diagnosis(payload: dict) -> str:
     community = payload.get("strategy_system", {}).get("community", {})
     time_context = payload.get("time_context", {})
     preference_alignment = payload.get("preference_alignment", {})
-    return (
-        f"## {payload['stock_code']} 诊断报告\n\n"
-        f"- 场景: {payload['needs_clarified']['scenario']}\n"
-        f"- 时间环境: {time_context.get('session', '-')}\n"
-        f"- 结论基准日: {time_context.get('analysis_date', '-')}\n"
-        f"- 用户风险偏好 / 周期: {preference_alignment.get('risk_preference', '-')} / {preference_alignment.get('default_horizon', '-')}\n"
-        f"- 四维评级: {rating['level']}\n"
-        f"- 风险等级: {payload['risk']['risk_level']}\n"
-        f"- 方法论阶段: {conclusion.get('market_stage', '')}\n"
-        f"- 标的定位: {setup.get('style', conclusion.get('style', ''))}\n"
-        f"- 介入方式: {setup.get('setup', conclusion.get('setup', ''))}\n"
-        f"- 社区情绪: {community.get('mood', '未知')} / {community.get('sentiment_score', '-')}\n"
-        f"- 建议动作: {conclusion['action']}\n"
-        f"- 买入价: {conclusion['entry_price']}\n"
-        f"- 止损价: {conclusion['stop_loss']}\n"
-        f"- 目标价: {conclusion['target_price']}\n"
-        f"- 建议仓位: {round(conclusion['position_ratio'] * 100)}%\n"
-        f"- 结论: {conclusion['summary']}"
+    lines = [
+        f"## {payload['stock_code']} 诊断报告",
+        "",
+        f"- 场景: {payload['needs_clarified']['scenario']}",
+        f"- 时间环境: {time_context.get('session', '-')}",
+        f"- 结论基准日: {time_context.get('analysis_date', '-')}",
+        f"- 用户风险偏好 / 周期: {preference_alignment.get('risk_preference', '-')} / {preference_alignment.get('default_horizon', '-')}",
+        f"- 四维评级: {rating['level']}",
+        f"- 风险等级: {payload['risk']['risk_level']}",
+        f"- 方法论阶段: {conclusion.get('market_stage', '')}",
+        f"- 标的定位: {setup.get('style', conclusion.get('style', ''))}",
+        f"- 介入方式: {setup.get('setup', conclusion.get('setup', ''))}",
+        f"- 社区情绪: {community.get('mood', '未知')} / {community.get('sentiment_score', '-')}",
+    ]
+    lines.extend(render_data_quality(payload))
+    if payload.get("experience_context", {}).get("warnings"):
+        lines.append(f"- 经验提醒: {'；'.join(payload['experience_context']['warnings'])}")
+    lines.extend(
+        [
+            f"- 建议动作: {conclusion['action']}",
+            f"- 买入价: {conclusion['entry_price']}",
+            f"- 止损价: {conclusion['stop_loss']}",
+            f"- 目标价: {conclusion['target_price']}",
+            f"- 建议仓位: {round(conclusion['position_ratio'] * 100)}%",
+            f"- 结论: {conclusion['summary']}",
+        ]
     )
+    return "\n".join(lines)
 
 
 def render_pre_market(payload: dict) -> str:
@@ -156,9 +196,10 @@ def render_market_cycle(payload: dict) -> str:
         f"- 涨跌家数: {summary.get('advancers', 0)} / {summary.get('decliners', 0)}",
         f"- 主线板块: {', '.join(summary.get('hot_sectors', [])) or '无'}",
         f"- 情绪锚点: {', '.join(summary.get('leaders', [])) or '无'}",
-        "",
-        "## 买入节奏",
+        f"- 扫描主线 / 龙头: {payload.get('summary', {}).get('top_mainline', '') or '无'} / {payload.get('summary', {}).get('top_leader', '') or '无'}",
     ]
+    lines.extend(render_data_quality(payload))
+    lines.extend(["", "## 买入节奏"])
     for item in playbook.get("buy_strategy", []):
         lines.append(f"- {item}")
     lines.append("")
@@ -185,9 +226,15 @@ def render_playbook(payload: dict) -> str:
         f"- 介入方式: {setup.get('setup', '')}",
         f"- 方法论分: {setup.get('methodology_score', '')}",
         f"- 建议仓位 / 首仓: {round(position_plan.get('preferred_position', 0) * 100)}% / {round(position_plan.get('first_probe_position', 0) * 100)}%",
-        "",
-        "## 入场信号",
     ]
+    lines.extend(render_data_quality(payload))
+    if payload.get("experience_context", {}).get("warnings"):
+        lines.append("")
+        lines.append("## 经验提醒")
+        for item in payload["experience_context"]["warnings"]:
+            lines.append(f"- {item}")
+    lines.append("")
+    lines.append("## 入场信号")
     for item in playbook.get("entry_signals", []):
         lines.append(f"- {item}")
     lines.append("")
@@ -347,6 +394,7 @@ def render_taoguba_vip(payload: dict) -> str:
 def render_user_profile(payload: dict) -> str:
     preferences = payload.get("preferences", {})
     memory = payload.get("memory", {})
+    learning = memory.get("learning_summary", {})
     return (
         "# 用户档案\n\n"
         f"- 风险偏好: {preferences.get('risk_preference', '-')}\n"
@@ -357,7 +405,10 @@ def render_user_profile(payload: dict) -> str:
         f"- 关注风格: {', '.join(preferences.get('focus_styles', [])) or '无'}\n"
         f"- 备注: {'；'.join(preferences.get('notes', [])) or '无'}\n"
         f"- 最近关注股票: {', '.join(memory.get('recent_stocks', [])) or '无'}\n"
-        f"- 股票画像数 / 题材画像数: {len(memory.get('stock_profiles', {}))} / {len(memory.get('theme_profiles', {}))}"
+        f"- 股票画像数 / 题材画像数: {len(memory.get('stock_profiles', {}))} / {len(memory.get('theme_profiles', {}))}\n"
+        f"- 经验交易数 / 胜率 / 平均收益: {learning.get('trade_count', 0)} / {learning.get('win_rate', 0)} / {learning.get('avg_return_pct', 0)}%\n"
+        f"- 最强 setup: {learning.get('best_setup', '无')} ({learning.get('best_setup_win_rate', 0)})\n"
+        f"- 最弱风格: {learning.get('weakest_style', '无')} ({learning.get('weakest_style_win_rate', 0)})"
     )
 
 
@@ -383,6 +434,15 @@ def render_user_memory(payload: dict) -> str:
     else:
         lines.append("- 无数据")
     lines.append("")
+    learning = memory.get("learning_summary", {})
+    lines.append("## 经验学习")
+    lines.append(
+        f"- 交易数 {learning.get('trade_count', 0)} | 胜率 {learning.get('win_rate', 0)} | 平均收益 {learning.get('avg_return_pct', 0)}%"
+    )
+    lines.append(
+        f"- 最强 setup {learning.get('best_setup', '无')} | 最弱风格 {learning.get('weakest_style', '无')} | 最强板块 {learning.get('strongest_sector', '无')}"
+    )
+    lines.append("")
     lines.append("## 股票画像")
     stock_profiles = memory.get("stock_profiles", {})
     if stock_profiles:
@@ -405,6 +465,134 @@ def render_user_memory(payload: dict) -> str:
             )
     else:
         lines.append("- 无数据")
+    lines.append("")
+    lines.append("## 最近复盘")
+    reviews = memory.get("trade_reviews", [])
+    if reviews:
+        for item in reviews[:10]:
+            lines.append(
+                f"- {item.get('timestamp', '')} | {item.get('stock_code', '')} | {item.get('setup', '')} | "
+                f"{item.get('outcome', '')} | {item.get('return_pct', 0)}%"
+            )
+    else:
+        lines.append("- 无数据")
+    return "\n".join(lines)
+
+
+def render_leaders(payload: dict) -> str:
+    lines = [
+        f"# 全市场主线/龙头扫描 {payload.get('date', '')}",
+        "",
+        f"- 市场阶段: {payload.get('market_cycle', {}).get('stage', '')}",
+        f"- 环境: {payload.get('market_cycle', {}).get('environment', '')}",
+        f"- 顶级主线: {payload.get('summary', {}).get('top_mainline', '') or '无'}",
+        f"- 顶级龙头: {payload.get('summary', {}).get('top_leader', '') or '无'}",
+    ]
+    lines.extend(render_data_quality(payload))
+    lines.append("")
+    lines.append("## 主线板块")
+    for item in payload.get("mainline_sectors", []):
+        leader = item.get("leader", {})
+        lines.append(
+            f"- {item.get('sector', '')} | 热度 {item.get('heat_score', 0)} | "
+            f"龙一 {leader.get('name', '')}({leader.get('code', '')}) | 变动 {item.get('change_pct', 0)}%"
+        )
+    if not payload.get("mainline_sectors"):
+        lines.append("- 无数据")
+    lines.append("")
+    lines.append("## 市场龙头")
+    for item in payload.get("market_leaders", []):
+        lines.append(
+            f"- {item.get('name', '')}({item.get('code', '')}) | {item.get('sector', '')} | "
+            f"{item.get('style', '')} | 分数 {item.get('methodology_score', 0)} | {item.get('setup', '')}"
+        )
+    if not payload.get("market_leaders"):
+        lines.append("- 无清晰龙头")
+    lines.append("")
+    lines.append("## 趋势中军")
+    for item in payload.get("trend_cores", []):
+        lines.append(
+            f"- {item.get('name', '')}({item.get('code', '')}) | {item.get('sector', '')} | "
+            f"分数 {item.get('methodology_score', 0)}"
+        )
+    if not payload.get("trend_cores"):
+        lines.append("- 无数据")
+    if payload.get("warnings"):
+        lines.append("")
+        lines.append("## 风险提醒")
+        for item in payload.get("warnings", []):
+            lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def render_review_trade(payload: dict) -> str:
+    review = payload.get("review", {})
+    learning = payload.get("learning_summary", {})
+    lines = [
+        f"# 交易复盘 {review.get('stock_name', '')} ({review.get('stock_code', '')})",
+        "",
+        f"- outcome: {review.get('outcome', '')}",
+        f"- 收益: {review.get('return_pct', 0)}%",
+        f"- 持有天数: {review.get('holding_days', 0)}",
+        f"- 风格 / setup: {review.get('style', '')} / {review.get('setup', '')}",
+        f"- 主题: {', '.join(review.get('themes', [])) or '无'}",
+        f"- 笔记: {review.get('note', '') or '无'}",
+    ]
+    lines.extend(render_data_quality(payload))
+    lines.extend(
+        [
+            "",
+            "## 学习摘要",
+            f"- 总交易数 {learning.get('trade_count', 0)} | 胜率 {learning.get('win_rate', 0)} | 平均收益 {learning.get('avg_return_pct', 0)}%",
+            f"- 最强 setup {learning.get('best_setup', '无')} | 最弱风格 {learning.get('weakest_style', '无')}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_review_cycle(payload: dict) -> str:
+    summary = payload.get("summary", {})
+    learning = payload.get("learning_summary", {})
+    lines = [
+        f"# {payload.get('workflow', '')}",
+        "",
+        f"- 样本数: {summary.get('trade_count', 0)}",
+        f"- 胜率: {summary.get('win_rate', 0)}",
+        f"- 平均收益: {summary.get('avg_return_pct', 0)}%",
+        f"- 平均持有天数: {summary.get('avg_holding_days', 0)}",
+    ]
+    if payload.get("focus"):
+        lines.append(f"- 当前聚焦: {payload.get('focus', '')}")
+    lines.extend(render_data_quality(payload))
+    lines.extend(
+        [
+            "",
+            "## 学习摘要",
+            f"- 最强 setup: {learning.get('best_setup', '无')}",
+            f"- 最弱风格: {learning.get('weakest_style', '无')}",
+            f"- 最强板块: {learning.get('strongest_sector', '无')}",
+        ]
+    )
+    if payload.get("recommendations"):
+        lines.append("")
+        lines.append("## 建议")
+        for item in payload.get("recommendations", []):
+            lines.append(f"- {item}")
+    if payload.get("suggestions"):
+        lines.append("")
+        lines.append("## 反馈建议")
+        for item in payload.get("suggestions", []):
+            lines.append(f"- {item}")
+    if payload.get("top_winners"):
+        lines.append("")
+        lines.append("## 最佳交易")
+        for item in payload.get("top_winners", [])[:5]:
+            lines.append(f"- {item.get('stock_code', '')} | {item.get('setup', '')} | {item.get('return_pct', 0)}%")
+    if payload.get("top_losers"):
+        lines.append("")
+        lines.append("## 最差交易")
+        for item in payload.get("top_losers", [])[:5]:
+            lines.append(f"- {item.get('stock_code', '')} | {item.get('setup', '')} | {item.get('return_pct', 0)}%")
     return "\n".join(lines)
 
 
@@ -585,6 +773,7 @@ def render_valuation(payload: dict) -> str:
         lines.append(f"- 降级原因: {', '.join(payload.get('degraded_reasons', []))}")
     for item in payload.get("errors", []):
         lines.append(f"- 错误: {item}")
+    lines.extend(render_data_quality(payload))
     lines.extend(
         [
             f"- 现价: {payload.get('price', '')}",
@@ -641,6 +830,9 @@ def render_quick_research(payload: dict) -> str:
         lines.append(f"- 降级原因: {', '.join(payload.get('degraded_reasons', []))}")
     for item in payload.get("errors", []):
         lines.append(f"- 错误: {item}")
+    lines.extend(render_data_quality(payload))
+    if payload.get("experience_context", {}).get("warnings"):
+        lines.append(f"- 经验提醒: {'；'.join(payload['experience_context']['warnings'])}")
     lines.extend(
         [
             f"- 机构覆盖: {'有' if coverage.get('has_consensus') else '无'} / {coverage.get('analyst_count', 0)} 家",
@@ -669,6 +861,7 @@ def render_theme_research(payload: dict) -> str:
     ]
     if payload.get("degraded"):
         lines.append(f"- 降级原因: {', '.join(payload.get('degraded_reasons', []))}")
+    lines.extend(render_data_quality(payload))
     if payload.get("available") is False:
         for item in payload.get("errors", []) or [payload.get("error", "")]:
             lines.append(f"- 错误: {item}")

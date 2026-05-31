@@ -45,6 +45,10 @@ class UserMemory:
     stock_notes: dict[str, list[str]] = field(default_factory=dict)
     stock_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     theme_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    trade_reviews: list[dict[str, Any]] = field(default_factory=list)
+    learning_stats: dict[str, Any] = field(default_factory=dict)
+    review_cycles: list[dict[str, Any]] = field(default_factory=list)
+    feedback_snapshots: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -129,6 +133,10 @@ class UserContextStore:
                 for theme, profile in ((payload.get("theme_profiles") or {}).items() if isinstance(payload.get("theme_profiles"), dict) else [])
                 if isinstance(profile, dict)
             },
+            trade_reviews=list(payload.get("trade_reviews", []))[:100],
+            learning_stats=dict(payload.get("learning_stats", {}) or {}),
+            review_cycles=list(payload.get("review_cycles", []))[:50],
+            feedback_snapshots=list(payload.get("feedback_snapshots", []))[:50],
         )
 
     def save_memory(self, memory: UserMemory) -> UserMemory:
@@ -138,6 +146,10 @@ class UserContextStore:
             stock_notes={code: _dedupe_strings(notes)[:20] for code, notes in memory.stock_notes.items()},
             stock_profiles={str(code): dict(profile) for code, profile in memory.stock_profiles.items()},
             theme_profiles={str(theme): dict(profile) for theme, profile in memory.theme_profiles.items()},
+            trade_reviews=list(memory.trade_reviews)[:100],
+            learning_stats=dict(memory.learning_stats or {}),
+            review_cycles=list(memory.review_cycles)[:50],
+            feedback_snapshots=list(memory.feedback_snapshots)[:50],
         )
         self._write_json(self.memory_path, normalized.to_dict())
         return normalized
@@ -156,6 +168,81 @@ class UserContextStore:
             if token and token not in current:
                 current.append(token)
         profile[field] = current[-limit:]
+
+    def _update_learning_bucket(
+        self,
+        buckets: dict[str, Any],
+        key: str,
+        *,
+        outcome: str,
+        return_pct: float,
+        holding_days: int,
+    ) -> None:
+        token = str(key or "").strip()
+        if not token:
+            return
+        bucket = buckets.setdefault(
+            token,
+            {
+                "trade_count": 0,
+                "win_count": 0,
+                "loss_count": 0,
+                "flat_count": 0,
+                "total_return_pct": 0.0,
+                "avg_return_pct": 0.0,
+                "avg_holding_days": 0.0,
+            },
+        )
+        bucket["trade_count"] = int(bucket.get("trade_count", 0) or 0) + 1
+        if outcome == "win":
+            bucket["win_count"] = int(bucket.get("win_count", 0) or 0) + 1
+        elif outcome == "loss":
+            bucket["loss_count"] = int(bucket.get("loss_count", 0) or 0) + 1
+        else:
+            bucket["flat_count"] = int(bucket.get("flat_count", 0) or 0) + 1
+        bucket["total_return_pct"] = round(float(bucket.get("total_return_pct", 0.0) or 0.0) + return_pct, 4)
+        bucket["avg_return_pct"] = round(bucket["total_return_pct"] / max(bucket["trade_count"], 1), 2)
+        bucket["avg_holding_days"] = round(
+            (
+                float(bucket.get("avg_holding_days", 0.0) or 0.0) * (bucket["trade_count"] - 1)
+                + holding_days
+            )
+            / max(bucket["trade_count"], 1),
+            2,
+        )
+        bucket["win_rate"] = round(bucket["win_count"] / max(bucket["trade_count"], 1), 2)
+
+    def _experience_summary(self, learning_stats: dict[str, Any]) -> dict[str, Any]:
+        overall = dict(learning_stats.get("overall", {}) or {})
+        setup_stats = dict(learning_stats.get("setup_stats", {}) or {})
+        style_stats = dict(learning_stats.get("style_stats", {}) or {})
+        sector_stats = dict(learning_stats.get("sector_stats", {}) or {})
+        best_setup = max(
+            setup_stats.items(),
+            key=lambda item: (item[1].get("win_rate", 0), item[1].get("avg_return_pct", 0)),
+            default=("", {}),
+        )
+        weakest_style = min(
+            style_stats.items(),
+            key=lambda item: (item[1].get("win_rate", 1), item[1].get("avg_return_pct", 0)),
+            default=("", {}),
+        )
+        strongest_sector = max(
+            sector_stats.items(),
+            key=lambda item: (item[1].get("avg_return_pct", 0), item[1].get("win_rate", 0)),
+            default=("", {}),
+        )
+        return {
+            "trade_count": overall.get("trade_count", 0),
+            "win_rate": overall.get("win_rate", 0.0),
+            "avg_return_pct": overall.get("avg_return_pct", 0.0),
+            "best_setup": best_setup[0],
+            "best_setup_win_rate": best_setup[1].get("win_rate", 0.0) if best_setup[0] else 0.0,
+            "weakest_style": weakest_style[0],
+            "weakest_style_win_rate": weakest_style[1].get("win_rate", 0.0) if weakest_style[0] else 0.0,
+            "strongest_sector": strongest_sector[0],
+            "strongest_sector_return_pct": strongest_sector[1].get("avg_return_pct", 0.0) if strongest_sector[0] else 0.0,
+        }
 
     def observe_stock_profile(self, stock_code: str, observation: dict[str, Any]) -> UserMemory:
         memory = self.load_memory()
@@ -241,6 +328,165 @@ class UserContextStore:
             profile["avg_heat_score"] = round(total / max(profile["observation_count"], 1), 2)
         return self.save_memory(memory)
 
+    def record_trade_feedback(
+        self,
+        stock_code: str,
+        *,
+        stock_name: str = "",
+        sector: str = "",
+        style: str = "",
+        setup: str = "",
+        themes: list[str] | None = None,
+        outcome: str = "flat",
+        return_pct: float = 0.0,
+        holding_days: int = 1,
+        note: str = "",
+    ) -> UserMemory:
+        memory = self.load_memory()
+        normalized_outcome = str(outcome or "flat").strip().lower()
+        if normalized_outcome not in {"win", "loss", "flat"}:
+            normalized_outcome = "flat"
+        review = {
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "sector": sector,
+            "style": style,
+            "setup": setup,
+            "themes": _dedupe_strings(themes),
+            "outcome": normalized_outcome,
+            "return_pct": round(float(return_pct), 2),
+            "holding_days": max(int(holding_days or 1), 1),
+            "note": str(note or "").strip(),
+            "timestamp": shanghai_timestamp_iso(),
+        }
+        memory.trade_reviews.insert(0, review)
+        learning_stats = memory.learning_stats or {}
+        overall = learning_stats.setdefault(
+            "overall",
+            {
+                "trade_count": 0,
+                "win_count": 0,
+                "loss_count": 0,
+                "flat_count": 0,
+                "total_return_pct": 0.0,
+                "avg_return_pct": 0.0,
+                "avg_holding_days": 0.0,
+            },
+        )
+        overall["trade_count"] = int(overall.get("trade_count", 0) or 0) + 1
+        if normalized_outcome == "win":
+            overall["win_count"] = int(overall.get("win_count", 0) or 0) + 1
+        elif normalized_outcome == "loss":
+            overall["loss_count"] = int(overall.get("loss_count", 0) or 0) + 1
+        else:
+            overall["flat_count"] = int(overall.get("flat_count", 0) or 0) + 1
+        overall["total_return_pct"] = round(float(overall.get("total_return_pct", 0.0) or 0.0) + review["return_pct"], 4)
+        overall["avg_return_pct"] = round(overall["total_return_pct"] / max(overall["trade_count"], 1), 2)
+        overall["avg_holding_days"] = round(
+            (
+                float(overall.get("avg_holding_days", 0.0) or 0.0) * (overall["trade_count"] - 1)
+                + review["holding_days"]
+            )
+            / max(overall["trade_count"], 1),
+            2,
+        )
+        overall["win_rate"] = round(overall["win_count"] / max(overall["trade_count"], 1), 2)
+        self._update_learning_bucket(
+            learning_stats.setdefault("setup_stats", {}),
+            setup,
+            outcome=normalized_outcome,
+            return_pct=review["return_pct"],
+            holding_days=review["holding_days"],
+        )
+        self._update_learning_bucket(
+            learning_stats.setdefault("style_stats", {}),
+            style,
+            outcome=normalized_outcome,
+            return_pct=review["return_pct"],
+            holding_days=review["holding_days"],
+        )
+        self._update_learning_bucket(
+            learning_stats.setdefault("sector_stats", {}),
+            sector,
+            outcome=normalized_outcome,
+            return_pct=review["return_pct"],
+            holding_days=review["holding_days"],
+        )
+        self._update_learning_bucket(
+            learning_stats.setdefault("stock_stats", {}),
+            stock_code,
+            outcome=normalized_outcome,
+            return_pct=review["return_pct"],
+            holding_days=review["holding_days"],
+        )
+        for theme in _dedupe_strings(themes):
+            self._update_learning_bucket(
+                learning_stats.setdefault("theme_stats", {}),
+                theme,
+                outcome=normalized_outcome,
+                return_pct=review["return_pct"],
+                holding_days=review["holding_days"],
+            )
+        learning_stats["summary"] = self._experience_summary(learning_stats)
+        memory.learning_stats = learning_stats
+        profile = memory.stock_profiles.setdefault(stock_code, {"stock_code": stock_code})
+        profile["last_review_outcome"] = normalized_outcome
+        profile["last_review_return_pct"] = review["return_pct"]
+        profile["last_review_holding_days"] = review["holding_days"]
+        profile["last_review_note"] = review["note"]
+        profile["experience_trade_count"] = int(profile.get("experience_trade_count", 0) or 0) + 1
+        profile["experience_win_rate"] = learning_stats.get("stock_stats", {}).get(stock_code, {}).get("win_rate", 0.0)
+        if review["note"]:
+            self._touch_recent_list(profile, "notes", [review["note"]], limit=20)
+        for theme in _dedupe_strings(themes):
+            theme_profile = memory.theme_profiles.setdefault(theme, {"theme": theme, "related_stocks": []})
+            theme_profile["last_review_outcome"] = normalized_outcome
+            theme_profile["last_review_return_pct"] = review["return_pct"]
+            theme_profile["experience_trade_count"] = int(theme_profile.get("experience_trade_count", 0) or 0) + 1
+            theme_profile["experience_win_rate"] = learning_stats.get("theme_stats", {}).get(theme, {}).get("win_rate", 0.0)
+            self._touch_recent_list(theme_profile, "related_stocks", [stock_code], limit=20)
+        return self.save_memory(memory)
+
+    def record_review_cycle(
+        self,
+        *,
+        cycle_type: str,
+        start_date: str | None,
+        end_date: str | None,
+        summary: dict[str, Any],
+        recommendations: list[str],
+    ) -> UserMemory:
+        memory = self.load_memory()
+        entry = {
+            "cycle_type": cycle_type,
+            "start_date": start_date or "",
+            "end_date": end_date or "",
+            "summary": dict(summary or {}),
+            "recommendations": list(recommendations or []),
+            "timestamp": shanghai_timestamp_iso(),
+        }
+        memory.review_cycles.insert(0, entry)
+        return self.save_memory(memory)
+
+    def record_feedback_snapshot(
+        self,
+        *,
+        focus: str,
+        suggestions: list[str],
+        highlighted_setups: list[str] | None = None,
+        highlighted_themes: list[str] | None = None,
+    ) -> UserMemory:
+        memory = self.load_memory()
+        entry = {
+            "focus": focus,
+            "suggestions": list(suggestions or []),
+            "highlighted_setups": _dedupe_strings(highlighted_setups),
+            "highlighted_themes": _dedupe_strings(highlighted_themes),
+            "timestamp": shanghai_timestamp_iso(),
+        }
+        memory.feedback_snapshots.insert(0, entry)
+        return self.save_memory(memory)
+
     def remember_workflow(
         self,
         workflow: str,
@@ -286,9 +532,15 @@ class UserContextStore:
         memory.stock_profiles.pop(stock_code, None)
         memory.recent_stocks = [item for item in memory.recent_stocks if item != stock_code]
         memory.recent_workflows = [item for item in memory.recent_workflows if item.get("stock_code") != stock_code]
+        memory.trade_reviews = [item for item in memory.trade_reviews if item.get("stock_code") != stock_code]
+        stock_stats = memory.learning_stats.get("stock_stats", {}) if isinstance(memory.learning_stats, dict) else {}
+        if isinstance(stock_stats, dict):
+            stock_stats.pop(stock_code, None)
         for theme, profile in memory.theme_profiles.items():
             related = [item for item in profile.get("related_stocks", []) if item != stock_code]
             profile["related_stocks"] = related
+        if isinstance(memory.learning_stats, dict):
+            memory.learning_stats["summary"] = self._experience_summary(memory.learning_stats)
         return self.save_memory(memory)
 
     def build_context(self, stock_code: str | None = None) -> dict[str, Any]:
@@ -299,9 +551,13 @@ class UserContextStore:
             "memory": {
                 "recent_stocks": list(memory.recent_stocks),
                 "recent_workflows": list(memory.recent_workflows),
-                "stock_notes": {},
+                "stock_notes": dict(memory.stock_notes),
                 "stock_profiles": memory.stock_profiles,
                 "theme_profiles": memory.theme_profiles,
+                "trade_reviews": list(memory.trade_reviews[:20]),
+                "learning_stats": dict(memory.learning_stats or {}),
+                "review_cycles": list(memory.review_cycles[:20]),
+                "feedback_snapshots": list(memory.feedback_snapshots[:20]),
             },
         }
         if stock_code:
@@ -312,4 +568,5 @@ class UserContextStore:
                 stock_code: dict(memory.stock_profiles.get(stock_code, {}))
             }
             payload["memory"]["is_watchlist_stock"] = stock_code in preferences.watchlist
+        payload["memory"]["learning_summary"] = self._experience_summary(memory.learning_stats or {})
         return payload
