@@ -156,6 +156,34 @@ Examples:
 - `帮我复盘最近交易，看看我适合什么 setup。`
   Run `weekly-review`, then `memory-feedback`.
 
+## Short/Mid-Term Selection Heuristic
+
+When the user asks `谁更有机会` / `帮我选股` / `高盈亏比` / `舒服买点` for a holding period around 2 to 10 trading days, rank candidates with this priority:
+
+1. **Theme strength and catalyst clarity first**
+   Prefer names that belong to the current main line, or directly benefit from an active expansion theme.
+2. **Trend continuity and overhead supply second**
+   Prefer stocks already walking in a clean uptrend, or trend mid-caps that just completed a healthy pullback and regained support.
+3. **Volume-price structure and comfort third**
+   Prefer pullback support, breakout retest, or缩量整理后的放量再启动. Avoid consensus高潮日、连续大涨后的追高 and single-day weak-to-strong names with heavy overhead supply.
+4. **Static valuation only after the first three pass**
+   Lower PE/PEG alone must not outrank a stronger trend leader. Cheap laggards stay on the watchlist unless they also get a fresh catalyst and a visible trend repair.
+
+Use these labels explicitly when helpful:
+
+- `趋势票`
+  Main-line trend, suitable for pullback or confirmation entries.
+- `性价比票`
+  Valuation is better, but timing depends on catalyst rotation or trend repair.
+- `修复观察票`
+  Logic exists, but structure is still weak; do not rank it ahead of cleaner leaders.
+
+If the user asks for a `comfortable buy point`, default to:
+
+- support retest near key moving averages or prior breakout zones
+- confirmation after reclaiming an important intraday or daily level
+- no recommendation to chase a consensus acceleration unless the user explicitly wants breakout momentum trades
+
 ## Procedure
 
 1. Run `python3 scripts/run_skill.py self-check` before using live scenarios.
