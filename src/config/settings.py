@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+import sys
+import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -27,6 +29,38 @@ def _normalize_watchlist(value: Any) -> tuple[str, ...]:
     return tuple(item.strip() for item in items if str(item).strip())
 
 
+def _default_cache_dir() -> str:
+    home = Path.home()
+    if sys.platform == "darwin":
+        return str(home / "Library" / "Caches" / "a_shares_skill")
+    xdg_cache_home = os.getenv("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        return str(Path(xdg_cache_home) / "a_shares_skill")
+    return str(home / ".cache" / "a_shares_skill")
+
+
+def resolve_data_cache_dir(preferred: str | None = None) -> str:
+    candidates: list[Path] = []
+    if preferred:
+        candidates.append(Path(preferred).expanduser())
+    candidates.append(Path(_default_cache_dir()).expanduser())
+    candidates.append(Path.cwd() / ".cache" / "a_shares_skill")
+    candidates.append(Path(tempfile.gettempdir()) / "a_shares_skill")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return key
+        except OSError:
+            continue
+    return str(Path(tempfile.gettempdir()) / "a_shares_skill")
+
+
 @dataclass(frozen=True)
 class Config:
     """Skill configuration with offline-first defaults."""
@@ -42,7 +76,7 @@ class Config:
     profit_target_multiplier: float = 3.0
 
     min_daily_turnover_million: float = 50.0
-    data_cache_dir: str = "/tmp/a_shares_cache"
+    data_cache_dir: str = field(default_factory=resolve_data_cache_dir)
     sample_data_path: Optional[str] = None
     offline_mode: bool = False
     live_source: str = "tencent"
@@ -63,7 +97,7 @@ class Config:
             stop_loss_ratio=float(os.getenv("STOP_LOSS_RATIO", "0.07")),
             profit_target_multiplier=float(os.getenv("PROFIT_TARGET_MULTIPLIER", "3")),
             min_daily_turnover_million=float(os.getenv("MIN_DAILY_TURNOVER_MILLION", "50")),
-            data_cache_dir=os.getenv("DATA_CACHE_DIR", "/tmp/a_shares_cache"),
+            data_cache_dir=resolve_data_cache_dir(os.getenv("DATA_CACHE_DIR")),
             sample_data_path=os.getenv("A_SHARE_SKILL_DATA_PATH"),
             offline_mode=_to_bool(os.getenv("A_SHARE_SKILL_OFFLINE_MODE"), False),
             live_source=os.getenv("A_SHARE_SKILL_LIVE_SOURCE", "tencent"),
@@ -91,7 +125,7 @@ class Config:
             stop_loss_ratio=float(payload.get("trading", {}).get("stop_loss_rate", 0.07)),
             profit_target_multiplier=float(payload.get("trading", {}).get("profit_target_multiplier", 3.0)),
             min_daily_turnover_million=float(payload.get("filters", {}).get("min_daily_volume", 50000000)) / 1_000_000,
-            data_cache_dir=payload.get("env", {}).get("data_cache_dir", "/tmp/a_shares_cache"),
+            data_cache_dir=resolve_data_cache_dir(payload.get("env", {}).get("data_cache_dir")),
             sample_data_path=payload.get("env", {}).get("sample_data_path"),
             offline_mode=_to_bool(payload.get("env", {}).get("offline_mode"), False),
             live_source=payload.get("env", {}).get("live_source", "tencent"),

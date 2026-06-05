@@ -15,10 +15,13 @@ import pandas as pd
 
 from src.cli import normalize_filters
 from src.config import Config
+from src.config.settings import resolve_data_cache_dir
 from src.core.time_context import build_intent_time_context
 from src.main import _apply_runtime_defaults, build_parser
 from src.providers import build_provider
 from src.providers.base import OnlineDataError
+from src.providers.cache_store import ProviderCacheStore
+from src.providers.http_client import RetryingHttpClient
 from src.providers.live import TencentLiveProvider
 from src.skill import ASharesSkill
 from src.utils.time import SHANGHAI_TZ, shanghai_today_str
@@ -1227,6 +1230,40 @@ class SkillCompatibilityTests(unittest.TestCase):
         with patch("src.providers.live.urlopen", side_effect=URLError("timeout")):
             with self.assertRaises(OnlineDataError):
                 provider._http_get_json("https://example.com/api")
+
+    def test_retrying_http_client_wraps_network_errors(self) -> None:
+        client = RetryingHttpClient(
+            timeout_seconds=1.0,
+            max_retries=2,
+            urlopen_impl=lambda *args, **kwargs: (_ for _ in ()).throw(URLError("timeout")),
+            subprocess_run_impl=subprocess.run,
+            sleep_impl=lambda _: None,
+        )
+        with self.assertRaises(OnlineDataError):
+            client.get_json("https://example.com/api")
+
+    def test_provider_cache_store_roundtrip_csv_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ProviderCacheStore(temp_dir)
+            store.save_csv_rows(
+                "northbound_daily.csv",
+                fieldnames=["date", "hgt", "sgt"],
+                rows=[
+                    {"date": "2026-05-28", "hgt": "12.3", "sgt": "8.8"},
+                    {"date": "2026-05-29", "hgt": "18.4", "sgt": "11.7"},
+                ],
+            )
+            rows = store.load_csv_rows("northbound_daily.csv")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1]["date"], "2026-05-29")
+        self.assertEqual(rows[-1]["hgt"], "18.4")
+
+    def test_resolve_data_cache_dir_creates_writable_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = resolve_data_cache_dir(os.path.join(temp_dir, "nested-cache"))
+            marker = Path(cache_dir) / "probe.txt"
+            marker.write_text("ok", encoding="utf-8")
+        self.assertTrue(cache_dir.endswith("nested-cache"))
 
     def test_live_provider_parses_full_stack_payloads(self) -> None:
         provider = TencentLiveProvider(Config())

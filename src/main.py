@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any, Callable, Optional
 
 from src.cli import (
     normalize_filters,
@@ -298,303 +299,168 @@ def _apply_runtime_defaults(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
+CommandHandler = Callable[[ASharesSkill, argparse.Namespace], tuple[Any, Callable[..., str], tuple[Any, ...], Optional[Any]]]
+
+
+def _resolved_date(args: argparse.Namespace) -> str | None:
+    return None if getattr(args, "date_inferred", False) else getattr(args, "date", None)
+
+
+def _emit_output(
+    args: argparse.Namespace,
+    payload: Any,
+    renderer: Callable[..., str],
+    renderer_args: tuple[Any, ...] = (),
+    markdown_payload: Optional[Any] = None,
+) -> None:
+    if args.format == "json":
+        print(render_json(payload))
+        return
+    print(renderer(payload if markdown_payload is None else markdown_payload, *renderer_args))
+
+
+def _build_command_handlers() -> dict[str, CommandHandler]:
+    return {
+        "self-check": lambda skill, args: (skill.self_check(), render_json, (), None),
+        "flagship": lambda skill, args: (skill.flagship_overview(), render_flagship, (), None),
+        "profile-show": lambda skill, args: (skill.user_profile(), render_user_profile, (), None),
+        "profile-set": lambda skill, args: (
+            skill.update_user_profile(
+                risk_preference=args.risk_preference,
+                default_horizon=args.default_horizon,
+                preferred_sectors=_optional_list(args.preferred_sectors),
+                avoided_sectors=_optional_list(args.avoided_sectors),
+                watchlist=_optional_list(args.watchlist),
+                focus_styles=_optional_list(args.focus_styles),
+                notes=_optional_list(args.notes),
+            ),
+            render_user_profile,
+            (),
+            None,
+        ),
+        "memory-show": lambda skill, args: (skill.user_memory(args.code), render_user_memory, (), None),
+        "memory-note": lambda skill, args: (skill.add_memory_note(args.code, args.note), render_user_memory, (), None),
+        "memory-clear": lambda skill, args: (skill.clear_memory(args.code), render_user_memory, (), None),
+        "review-trade": lambda skill, args: (
+            skill.review_trade(
+                args.code,
+                outcome=args.outcome,
+                return_pct=args.return_pct,
+                holding_days=args.holding_days,
+                theme=args.theme,
+                note=args.note,
+            ),
+            render_review_trade,
+            (),
+            None,
+        ),
+        "weekly-review": lambda skill, args: (
+            skill.weekly_review(limit=args.limit, start_date=args.start_date, end_date=args.end_date),
+            render_review_cycle,
+            (),
+            None,
+        ),
+        "memory-feedback": lambda skill, args: (skill.memory_feedback(limit=args.limit), render_review_cycle, (), None),
+        "risk": lambda skill, args: (skill.risk(args.code, args.date), render_risk_report, (), None),
+        "diagnose": lambda skill, args: (
+            skill.diagnose(args.code, args.scenario, args.horizon, args.risk_preference, args.date),
+            render_diagnosis,
+            (),
+            None,
+        ),
+        "pick": lambda skill, args: (
+            skill.pick(normalize_filters(args.filters)),
+            render_stock_picker,
+            (normalize_filters(args.filters),),
+            None,
+        ),
+        "pre-market": lambda skill, args: (skill.pre_market_report(_resolved_date(args)), render_pre_market, (), None),
+        "post-market": lambda skill, args: (skill.post_market_review(_resolved_date(args)), render_post_market, (), None),
+        "market-cycle": lambda skill, args: (skill.market_cycle_report(_resolved_date(args)), render_market_cycle, (), None),
+        "leaders": lambda skill, args: (skill.leaders_scan(_resolved_date(args)), render_leaders, (), None),
+        "plan": lambda skill, args: (skill.trading_plan_report(args.code, args.date), render_trading_plan, (), None),
+        "playbook": lambda skill, args: (skill.strategy_playbook(args.code, _resolved_date(args)), render_playbook, (), None),
+        "news": lambda skill, args: (skill.stock_news(args.code, args.page_size), render_news, ("个股新闻",), None),
+        "telegraph": lambda skill, args: (skill.market_telegraph(args.page_size), render_news, ("市场快讯",), None),
+        "global-news": lambda skill, args: (skill.global_news(args.page_size), render_news, ("全球财经快讯",), None),
+        "announcements": lambda skill, args: (skill.announcements(args.code, args.page_size), render_news, ("巨潮公告",), None),
+        "fund-flow": lambda skill, args: (skill.fund_flow(args.code, args.period, args.limit), render_fund_flow, (), None),
+        "sectors": lambda skill, args: (skill.sector_rankings(args.top), render_sector_rankings, (), None),
+        "hot-stocks": lambda skill, args: (skill.hot_stocks(args.date, args.page_size), render_hot_stocks, (), None),
+        "taoguba-hot": lambda skill, args: (skill.taoguba_hot(args.page_size, args.include_content), render_taoguba_hot, (), None),
+        "taoguba-sentiment": lambda skill, args: (skill.taoguba_market_sentiment(args.page_size), render_taoguba_sentiment, (), None),
+        "taoguba-stock": lambda skill, args: (skill.taoguba_stock_sentiment(args.code, args.page_size), render_taoguba_stock, (), None),
+        "taoguba-vip": lambda skill, args: (skill.taoguba_vip_views(args.code, args.page_size), render_taoguba_vip, (), None),
+        "concept-blocks": lambda skill, args: (skill.concept_blocks(args.code), render_concept_blocks, (), None),
+        "reports": lambda skill, args: (skill.research_reports(args.code, args.page_size), render_reports, (), None),
+        "dragon-tiger": lambda skill, args: (skill.dragon_tiger(args.code, args.date, args.look_back), render_dragon_tiger, (), None),
+        "daily-dragon-tiger": lambda skill, args: (skill.daily_dragon_tiger(args.date, args.min_net_buy), render_daily_dragon_tiger, (), None),
+        "margin": lambda skill, args: (
+            skill.margin_trading(args.code, args.page_size),
+            render_rows,
+            ("融资融券", ["date", "rzye", "rqye", "rzrqye"]),
+            None,
+        ),
+        "block-trades": lambda skill, args: (
+            skill.block_trades(args.code, args.page_size),
+            render_rows,
+            ("大宗交易", ["date", "price", "vol", "amount", "buyer", "premium_pct"]),
+            None,
+        ),
+        "holders": lambda skill, args: (
+            skill.holder_numbers(args.code, args.page_size),
+            render_rows,
+            ("股东户数", ["date", "holder_num", "change_ratio", "avg_shares"]),
+            None,
+        ),
+        "dividends": lambda skill, args: (
+            skill.dividend_history(args.code, args.page_size),
+            render_rows,
+            ("分红送转", ["date", "bonus_rmb", "transfer_ratio", "bonus_ratio", "plan"]),
+            None,
+        ),
+        "lockup": lambda skill, args: (skill.lockup_expiry(args.code, args.date, args.forward_days), render_lockup, (), None),
+        "northbound": lambda skill, args: (skill.northbound_flow(args.history_days), render_northbound, (), None),
+        "stock-info": lambda skill, args: (skill.stock_info(args.code), render_stock_info, (), None),
+        "quotes": lambda skill, args: (skill.realtime_quotes(normalize_filters(args.codes), args.kind), render_quotes, (), None),
+        "valuation": lambda skill, args: (skill.valuation(args.code), render_valuation, (), None),
+        "compare": lambda skill, args: (skill.compare_valuations(normalize_filters(args.codes)), render_compare, (), None),
+        "theme-research": lambda skill, args: (
+            skill.thematic_research(normalize_filters(args.queries), args.channel, args.size, args.supplement_per_stock),
+            render_theme_research,
+            (),
+            None,
+        ),
+        "quick-research": lambda skill, args: (skill.quick_research(args.code, _resolved_date(args)), render_quick_research, (), None),
+        "kline": lambda skill, args: (skill.price_bars(args.code, args.frequency, args.limit), render_price_bars, (), None),
+        "order-book": lambda skill, args: (skill.order_book(args.code), render_order_book, (), None),
+        "transactions": lambda skill, args: (skill.transactions(args.code, args.start, args.limit), render_transactions, (), None),
+        "quarterly-snapshot": lambda skill, args: (skill.financial_snapshot(args.code), render_financial_snapshot, (), None),
+        "f10": lambda skill, args: (skill.f10_profile(args.code, args.category), render_f10_profile, (), None),
+        "finance": lambda skill, args: (
+            skill.financial_report(args.code, args.report_type, args.page_size),
+            render_rows,
+            ("财报三表", ["报告日", "净利润", "营业总收入", "资产总计", "负债合计", "经营活动产生的现金流量净额"]),
+            None,
+        ),
+        "consensus-eps": lambda skill, args: (skill.consensus_eps(args.code), render_consensus_eps, (), None),
+        "iwencai-search": lambda skill, args: (skill.iwencai_search(args.query, args.channel, args.size), render_iwencai, ("iwencai 语义检索",), None),
+        "iwencai-query": lambda skill, args: (skill.iwencai_query(args.query, args.page, args.limit), render_iwencai, ("iwencai 结构化查询",), None),
+    }
+
+
 def main() -> None:
     parser = build_parser()
     args = _apply_runtime_defaults(parser.parse_args())
     skill = ASharesSkill()
-
-    if args.command == "self-check":
-        payload = skill.self_check()
-        print(render_json(payload) if args.format == "json" else render_json(payload))
-        return
-
-    if args.command == "flagship":
-        payload = skill.flagship_overview()
-        print(render_json(payload) if args.format == "json" else render_flagship(payload))
-        return
-
-    if args.command == "profile-show":
-        payload = skill.user_profile()
-        print(render_json(payload) if args.format == "json" else render_user_profile(payload))
-        return
-
+    handlers = _build_command_handlers()
+    handler = handlers.get(args.command)
+    if handler is None:
+        parser.error(f"unknown command: {args.command}")
+    payload, renderer, renderer_args, markdown_payload = handler(skill, args)
     if args.command == "profile-set":
-        payload = skill.update_user_profile(
-            risk_preference=args.risk_preference,
-            default_horizon=args.default_horizon,
-            preferred_sectors=_optional_list(args.preferred_sectors),
-            avoided_sectors=_optional_list(args.avoided_sectors),
-            watchlist=_optional_list(args.watchlist),
-            focus_styles=_optional_list(args.focus_styles),
-            notes=_optional_list(args.notes),
-        )
-        print(render_json(payload) if args.format == "json" else render_user_profile({**payload, "memory": skill.user_profile().get("memory", {})}))
-        return
-
-    if args.command == "memory-show":
-        payload = skill.user_memory(args.code)
-        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
-        return
-
-    if args.command == "memory-note":
-        payload = skill.add_memory_note(args.code, args.note)
-        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
-        return
-
-    if args.command == "memory-clear":
-        payload = skill.clear_memory(args.code)
-        print(render_json(payload) if args.format == "json" else render_user_memory(payload))
-        return
-
-    if args.command == "review-trade":
-        payload = skill.review_trade(
-            args.code,
-            outcome=args.outcome,
-            return_pct=args.return_pct,
-            holding_days=args.holding_days,
-            theme=args.theme,
-            note=args.note,
-        )
-        print(render_json(payload) if args.format == "json" else render_review_trade(payload))
-        return
-
-    if args.command == "weekly-review":
-        payload = skill.weekly_review(limit=args.limit, start_date=args.start_date, end_date=args.end_date)
-        print(render_json(payload) if args.format == "json" else render_review_cycle(payload))
-        return
-
-    if args.command == "memory-feedback":
-        payload = skill.memory_feedback(limit=args.limit)
-        print(render_json(payload) if args.format == "json" else render_review_cycle(payload))
-        return
-
-    if args.command == "risk":
-        payload = skill.risk(args.code, args.date)
-        print(render_json(payload) if args.format == "json" else render_risk_report(payload))
-        return
-
-    if args.command == "diagnose":
-        payload = skill.diagnose(args.code, args.scenario, args.horizon, args.risk_preference, args.date)
-        print(render_json(payload) if args.format == "json" else render_diagnosis(payload))
-        return
-
-    if args.command == "pick":
-        filters = normalize_filters(args.filters)
-        payload = skill.pick(filters)
-        print(render_json(payload) if args.format == "json" else render_stock_picker(payload, filters))
-        return
-
-    if args.command == "pre-market":
-        payload = skill.pre_market_report(None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_pre_market(payload))
-        return
-
-    if args.command == "post-market":
-        payload = skill.post_market_review(None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_post_market(payload))
-        return
-
-    if args.command == "market-cycle":
-        payload = skill.market_cycle_report(None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_market_cycle(payload))
-        return
-
-    if args.command == "leaders":
-        payload = skill.leaders_scan(None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_leaders(payload))
-        return
-
-    if args.command == "plan":
-        payload = skill.trading_plan_report(args.code, args.date)
-        print(render_json(payload) if args.format == "json" else render_trading_plan(payload))
-        return
-
-    if args.command == "playbook":
-        payload = skill.strategy_playbook(args.code, None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_playbook(payload))
-        return
-
-    if args.command == "news":
-        payload = skill.stock_news(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_news(payload, "个股新闻"))
-        return
-
-    if args.command == "telegraph":
-        payload = skill.market_telegraph(args.page_size)
-        print(render_json(payload) if args.format == "json" else render_news(payload, "市场快讯"))
-        return
-
-    if args.command == "global-news":
-        payload = skill.global_news(args.page_size)
-        print(render_json(payload) if args.format == "json" else render_news(payload, "全球财经快讯"))
-        return
-
-    if args.command == "announcements":
-        payload = skill.announcements(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_news(payload, "巨潮公告"))
-        return
-
-    if args.command == "fund-flow":
-        payload = skill.fund_flow(args.code, args.period, args.limit)
-        print(render_json(payload) if args.format == "json" else render_fund_flow(payload))
-        return
-
-    if args.command == "sectors":
-        payload = skill.sector_rankings(args.top)
-        print(render_json(payload) if args.format == "json" else render_sector_rankings(payload))
-        return
-
-    if args.command == "hot-stocks":
-        payload = skill.hot_stocks(args.date, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_hot_stocks(payload))
-        return
-
-    if args.command == "taoguba-hot":
-        payload = skill.taoguba_hot(args.page_size, args.include_content)
-        print(render_json(payload) if args.format == "json" else render_taoguba_hot(payload))
-        return
-
-    if args.command == "taoguba-sentiment":
-        payload = skill.taoguba_market_sentiment(args.page_size)
-        print(render_json(payload) if args.format == "json" else render_taoguba_sentiment(payload))
-        return
-
-    if args.command == "taoguba-stock":
-        payload = skill.taoguba_stock_sentiment(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_taoguba_stock(payload))
-        return
-
-    if args.command == "taoguba-vip":
-        payload = skill.taoguba_vip_views(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_taoguba_vip(payload))
-        return
-
-    if args.command == "concept-blocks":
-        payload = skill.concept_blocks(args.code)
-        print(render_json(payload) if args.format == "json" else render_concept_blocks(payload))
-        return
-
-    if args.command == "reports":
-        payload = skill.research_reports(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_reports(payload))
-        return
-
-    if args.command == "dragon-tiger":
-        payload = skill.dragon_tiger(args.code, args.date, args.look_back)
-        print(render_json(payload) if args.format == "json" else render_dragon_tiger(payload))
-        return
-
-    if args.command == "daily-dragon-tiger":
-        payload = skill.daily_dragon_tiger(args.date, args.min_net_buy)
-        print(render_json(payload) if args.format == "json" else render_daily_dragon_tiger(payload))
-        return
-
-    if args.command == "margin":
-        payload = skill.margin_trading(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_rows(payload, "融资融券", ["date", "rzye", "rqye", "rzrqye"]))
-        return
-
-    if args.command == "block-trades":
-        payload = skill.block_trades(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_rows(payload, "大宗交易", ["date", "price", "vol", "amount", "buyer", "premium_pct"]))
-        return
-
-    if args.command == "holders":
-        payload = skill.holder_numbers(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_rows(payload, "股东户数", ["date", "holder_num", "change_ratio", "avg_shares"]))
-        return
-
-    if args.command == "dividends":
-        payload = skill.dividend_history(args.code, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_rows(payload, "分红送转", ["date", "bonus_rmb", "transfer_ratio", "bonus_ratio", "plan"]))
-        return
-
-    if args.command == "lockup":
-        payload = skill.lockup_expiry(args.code, args.date, args.forward_days)
-        print(render_json(payload) if args.format == "json" else render_lockup(payload))
-        return
-
-    if args.command == "northbound":
-        payload = skill.northbound_flow(args.history_days)
-        print(render_json(payload) if args.format == "json" else render_northbound(payload))
-        return
-
-    if args.command == "stock-info":
-        payload = skill.stock_info(args.code)
-        print(render_json(payload) if args.format == "json" else render_stock_info(payload))
-        return
-
-    if args.command == "quotes":
-        payload = skill.realtime_quotes(normalize_filters(args.codes), args.kind)
-        print(render_json(payload) if args.format == "json" else render_quotes(payload))
-        return
-
-    if args.command == "valuation":
-        payload = skill.valuation(args.code)
-        print(render_json(payload) if args.format == "json" else render_valuation(payload))
-        return
-
-    if args.command == "compare":
-        payload = skill.compare_valuations(normalize_filters(args.codes))
-        print(render_json(payload) if args.format == "json" else render_compare(payload))
-        return
-
-    if args.command == "theme-research":
-        payload = skill.thematic_research(normalize_filters(args.queries), args.channel, args.size, args.supplement_per_stock)
-        print(render_json(payload) if args.format == "json" else render_theme_research(payload))
-        return
-
-    if args.command == "quick-research":
-        payload = skill.quick_research(args.code, None if getattr(args, "date_inferred", False) else args.date)
-        print(render_json(payload) if args.format == "json" else render_quick_research(payload))
-        return
-
-    if args.command == "kline":
-        payload = skill.price_bars(args.code, args.frequency, args.limit)
-        print(render_json(payload) if args.format == "json" else render_price_bars(payload))
-        return
-
-    if args.command == "order-book":
-        payload = skill.order_book(args.code)
-        print(render_json(payload) if args.format == "json" else render_order_book(payload))
-        return
-
-    if args.command == "transactions":
-        payload = skill.transactions(args.code, args.start, args.limit)
-        print(render_json(payload) if args.format == "json" else render_transactions(payload))
-        return
-
-    if args.command == "quarterly-snapshot":
-        payload = skill.financial_snapshot(args.code)
-        print(render_json(payload) if args.format == "json" else render_financial_snapshot(payload))
-        return
-
-    if args.command == "f10":
-        payload = skill.f10_profile(args.code, args.category)
-        print(render_json(payload) if args.format == "json" else render_f10_profile(payload))
-        return
-
-    if args.command == "finance":
-        payload = skill.financial_report(args.code, args.report_type, args.page_size)
-        print(render_json(payload) if args.format == "json" else render_rows(payload, "财报三表", ["报告日", "净利润", "营业总收入", "资产总计", "负债合计", "经营活动产生的现金流量净额"]))
-        return
-
-    if args.command == "consensus-eps":
-        payload = skill.consensus_eps(args.code)
-        print(render_json(payload) if args.format == "json" else render_consensus_eps(payload))
-        return
-
-    if args.command == "iwencai-search":
-        payload = skill.iwencai_search(args.query, args.channel, args.size)
-        print(render_json(payload) if args.format == "json" else render_iwencai(payload, "iwencai 语义检索"))
-        return
-
-    if args.command == "iwencai-query":
-        payload = skill.iwencai_query(args.query, args.page, args.limit)
-        print(render_json(payload) if args.format == "json" else render_iwencai(payload, "iwencai 结构化查询"))
-        return
-
-    parser.error(f"unknown command: {args.command}")
+        markdown_payload = {**payload, "memory": skill.user_profile().get("memory", {})}
+    _emit_output(args, payload, renderer, renderer_args, markdown_payload)
 
 
 if __name__ == "__main__":

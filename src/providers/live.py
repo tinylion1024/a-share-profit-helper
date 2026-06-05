@@ -7,20 +7,18 @@ import json
 import re
 import secrets
 import subprocess
-import time
 import uuid
-from csv import DictReader, DictWriter
 from datetime import datetime, timedelta
-from pathlib import Path
 from statistics import mean
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from src.config import Config
 from src.models import MarketSnapshot, StockSnapshot
 from src.providers.base import DataNotFoundError, MarketDataProvider, OnlineDataError
+from src.providers.cache_store import ProviderCacheStore
+from src.providers.http_client import RetryingHttpClient
 from src.providers.taoguba_authors import TAOGUBA_VIP_AUTHORS
 from src.utils.time import SHANGHAI_TZ, shanghai_today_str
 
@@ -94,30 +92,20 @@ class TencentLiveProvider(MarketDataProvider):
         self.config = config or Config.load()
         self._max_retries = 2
         self._stock_lookup_rows: list[dict[str, str]] | None = None
+        self._http_client = RetryingHttpClient(
+            timeout_seconds=self.config.source_timeout_seconds,
+            max_retries=self._max_retries,
+            urlopen_impl=urlopen,
+            subprocess_run_impl=subprocess.run,
+        )
+        self._cache_store = ProviderCacheStore(self.config.data_cache_dir)
 
     @property
     def source_name(self) -> str:
         return "live-tencent-finance"
 
     def _request_with_retries(self, label: str, operation) -> Any:
-        last_error: Exception | None = None
-        for attempt in range(1, self._max_retries + 1):
-            try:
-                return operation()
-            except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
-                last_error = exc
-                if attempt >= self._max_retries:
-                    break
-                time.sleep(0.15 * attempt)
-        if isinstance(last_error, HTTPError):
-            detail = f"HTTP {last_error.code}"
-        elif isinstance(last_error, URLError):
-            detail = f"network error: {last_error.reason}"
-        elif isinstance(last_error, subprocess.CalledProcessError):
-            detail = f"curl failed with exit code {last_error.returncode}"
-        else:
-            detail = str(last_error) if last_error else "unknown error"
-        raise OnlineDataError(f"{label} failed after {self._max_retries} attempts: {detail}") from last_error
+        return self._http_client.request_with_retries(label, operation)
 
     def _http_get_text(
         self,
@@ -125,22 +113,14 @@ class TencentLiveProvider(MarketDataProvider):
         encoding: str = "gbk",
         headers: dict[str, str] | None = None,
     ) -> str:
-        def run() -> str:
-            request_headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "application/json,text/plain,*/*",
-                "Referer": "https://gu.qq.com/",
-            }
-            if headers:
-                request_headers.update(headers)
-            request = Request(
-                url,
-                headers=request_headers,
-            )
-            with urlopen(request, timeout=self.config.source_timeout_seconds) as response:
-                return response.read().decode(encoding, errors="ignore")
-
-        return self._request_with_retries(f"GET text {url}", run)
+        request_headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+            "Referer": "https://gu.qq.com/",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self._http_client.get_text(url, encoding=encoding, headers=request_headers)
 
     def _taoguba_headers(self, referer: str = "https://www.tgb.cn/") -> dict[str, str]:
         return {
@@ -168,30 +148,16 @@ class TencentLiveProvider(MarketDataProvider):
         }
 
     def _http_get_json(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            request_headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "application/json,text/plain,*/*",
-            }
-            if headers:
-                request_headers.update(headers)
-            request = Request(url, headers=request_headers)
-            with urlopen(request, timeout=self.config.source_timeout_seconds) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            return json.loads(raw)
-
-        return self._request_with_retries(f"GET json {url}", run)
+        request_headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self._http_client.get_json(url, headers=request_headers)
 
     def _curl_get_json(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            command = ["curl", "-L", "--max-time", str(int(max(self.config.source_timeout_seconds, 1)))]
-            for key, value in (headers or {}).items():
-                command.extend(["-H", f"{key}: {value}"])
-            command.append(url)
-            completed = subprocess.run(command, check=True, capture_output=True, text=True)
-            return json.loads(completed.stdout)
-
-        return self._request_with_retries(f"curl json {url}", run)
+        return self._http_client.curl_get_json(url, headers=headers)
 
     def _http_post_form_json(
         self,
@@ -199,21 +165,14 @@ class TencentLiveProvider(MarketDataProvider):
         form_data: dict[str, str],
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            request_headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "application/json,text/plain,*/*",
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            if headers:
-                request_headers.update(headers)
-            payload = urlencode(form_data).encode("utf-8")
-            request = Request(url, data=payload, headers=request_headers, method="POST")
-            with urlopen(request, timeout=self.config.source_timeout_seconds) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            return json.loads(raw)
-
-        return self._request_with_retries(f"POST form json {url}", run)
+        request_headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self._http_client.post_form_json(url, form_data=form_data, headers=request_headers)
 
     def _http_post_json(
         self,
@@ -221,21 +180,14 @@ class TencentLiveProvider(MarketDataProvider):
         payload: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        def run() -> dict[str, Any]:
-            request_headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "application/json,text/plain,*/*",
-                "Content-Type": "application/json",
-            }
-            if headers:
-                request_headers.update(headers)
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            request = Request(url, data=body, headers=request_headers, method="POST")
-            with urlopen(request, timeout=self.config.source_timeout_seconds) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            return json.loads(raw)
-
-        return self._request_with_retries(f"POST json {url}", run)
+        request_headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            request_headers.update(headers)
+        return self._http_client.post_json(url, payload=payload, headers=request_headers)
 
     def _resolve_symbol(self, code: str) -> str:
         for prefix, starters in SYMBOL_PREFIXES.items():
@@ -426,31 +378,23 @@ class TencentLiveProvider(MarketDataProvider):
         return result.get("data") or []
 
     def _cache_path(self, filename: str) -> Path:
-        path = Path(self.config.data_cache_dir) / filename
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
+        return self._cache_store.path(filename)
 
     def _save_northbound_snapshot(self, date: str, hgt: float, sgt: float) -> None:
         path = self._cache_path("northbound_daily.csv")
         rows: dict[str, dict[str, str]] = {}
-        if path.exists():
-            with path.open("r", encoding="utf-8", newline="") as handle:
-                for row in DictReader(handle):
-                    if row.get("date"):
-                        rows[row["date"]] = row
+        for row in self._cache_store.load_csv_rows("northbound_daily.csv"):
+            if row.get("date"):
+                rows[row["date"]] = row
         rows[date] = {"date": date, "hgt": str(hgt), "sgt": str(sgt)}
-        with path.open("w", encoding="utf-8", newline="") as handle:
-            writer = DictWriter(handle, fieldnames=["date", "hgt", "sgt"])
-            writer.writeheader()
-            for key in sorted(rows):
-                writer.writerow(rows[key])
+        self._cache_store.save_csv_rows(
+            "northbound_daily.csv",
+            fieldnames=["date", "hgt", "sgt"],
+            rows=[rows[key] for key in sorted(rows)],
+        )
 
     def _load_northbound_history(self, limit: int = 20) -> list[dict[str, Any]]:
-        path = self._cache_path("northbound_daily.csv")
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            rows = list(DictReader(handle))
+        rows = self._cache_store.load_csv_rows("northbound_daily.csv")
         result = []
         for row in rows[-limit:]:
             result.append(

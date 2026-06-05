@@ -39,7 +39,7 @@
 - 仓库内入口：`python3 scripts/run_skill.py`
 - 模块入口：`python3 -m src.main`
 
-核心封装在 [src/skill.py](/Users/zhangshaowei/Documents/Codex/2026-05-28/tinylion1024-a-share-profit-helper-https/repo/src/skill.py)。
+核心封装在 [src/skill.py](src/skill.py)。
 
 ### 2. 在线优先的多源数据层
 
